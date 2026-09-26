@@ -1,0 +1,4 @@
+# Build tools pinned for reproducible builds: python -m pip install -r tools/requirements-build.txt
+# The C++ compiler itself comes from Visual Studio 2026 (MSVC 14.51) on Windows.
+cmake==4.4.3
+ninja==1.13.2

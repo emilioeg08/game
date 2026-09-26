@@ -1,0 +1,12 @@
+# Build output
+/build/
+/out/
+
+# Benchmark and profiling output (baselines worth keeping go to docs/BENCHMARKS.md)
+/bench-results/
+*.trace.json
+
+# IDE / local
+/.vs/
+/.idea/
+CMakeUserPresets.json

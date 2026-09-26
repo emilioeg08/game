@@ -1,0 +1,56 @@
+{
+    "version": 6,
+    "cmakeMinimumRequired": { "major": 3, "minor": 25, "patch": 0 },
+    "configurePresets": [
+        {
+            "name": "base",
+            "hidden": true,
+            "generator": "Ninja",
+            "binaryDir": "${sourceDir}/build/${presetName}",
+            "cacheVariables": {
+                "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
+                "GX_WARNINGS_AS_ERRORS": "ON"
+            }
+        },
+        {
+            "name": "debug",
+            "inherits": "base",
+            "displayName": "Debug",
+            "description": "No optimization, asserts on",
+            "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug" }
+        },
+        {
+            "name": "release",
+            "inherits": "base",
+            "displayName": "Release",
+            "description": "Optimized, GX_ASSERT off (GX_CHECK stays on). Use for benchmarks.",
+            "cacheVariables": { "CMAKE_BUILD_TYPE": "Release" }
+        },
+        {
+            "name": "profile",
+            "inherits": "base",
+            "displayName": "Profile",
+            "description": "Optimized with debug info and asserts on. Use for profiling and debugging perf issues.",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+                "GX_FORCE_ASSERTS": "ON"
+            }
+        }
+    ],
+    "buildPresets": [
+        { "name": "debug", "configurePreset": "debug" },
+        { "name": "release", "configurePreset": "release" },
+        { "name": "profile", "configurePreset": "profile" }
+    ],
+    "testPresets": [
+        {
+            "name": "base",
+            "hidden": true,
+            "output": { "outputOnFailure": true },
+            "execution": { "noTestsAction": "error", "jobs": 4 }
+        },
+        { "name": "debug", "inherits": "base", "configurePreset": "debug" },
+        { "name": "release", "inherits": "base", "configurePreset": "release" },
+        { "name": "profile", "inherits": "base", "configurePreset": "profile" }
+    ]
+}
