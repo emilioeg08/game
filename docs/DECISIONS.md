@@ -139,3 +139,48 @@ sustituya y explique por qué.
 - **Decisión:** `motionGrain = 1024`, el mejor o casi el mejor en todas las escalas.
 - **Lección:** una sola tabla no basta en esta máquina; las decisiones de rendimiento se toman con varias
   ejecuciones (riesgo 3 de ARCHITECTURE.md).
+
+## ADR-016 — Cliente gráfico con SDL3 + Dear ImGui, fijados por versión y hash
+
+- **Contexto:** para jugar hace falta ventana, entrada y una interfaz densa (paneles, inspectores). El
+  usuario aprobó descargar SDL3 y Dear ImGui.
+- **Decisión:** SDL 3.4.16 (estático; ventana, entrada y render 2D sobre Direct3D 11) y Dear ImGui v1.92.9b,
+  vía `FetchContent` con `URL_HASH SHA256`. Solo los enlaza `Apps/Game`. El mapa se dibuja con las draw lists
+  de ImGui. `GX_BUILD_CLIENT=OFF` compila todo lo demás sin descargar nada.
+- **Alternativas:** raylib (más sencilla, menos adecuada para herramientas densas) y un render propio sobre
+  D3D, Vulkan o bgfx (prematuro: el mapa 2D no lo necesita). El render 3D se decidirá cuando haga falta.
+- **Consecuencias:** la presentación es sustituible. La simulación no sabe que existe.
+
+## ADR-017 — Modelo de vuelo provisional: newtoniano, impulsor de alto empuje, sin gravedad sobre naves
+
+- **Decisión:** inercia más empuje máximo, crucero como límite del autopiloto y un controlador de velocidad
+  deseada que planifica la frenada al 80 % del empuje y limita la velocidad de cierre a lo que cubre un paso
+  (nunca se pasa). Sin gravedad sobre naves por ahora (DESIGN.md).
+- **Verificado:** llega y se detiene con pasos de 0,1, 1 y 5 s, a menos del 15 % del tiempo ideal
+  (`Space.AutopilotReachesAPointAndStops`), y mantiene posición junto a un planeta en órbita
+  (`Space.AutopilotKeepsStationWithAnOrbitingBody`).
+- **Corrección hecha durante el slice:** el objetivo se evalúa en el instante al que se refiere el estado de
+  la nave (el paso anterior). Comparar la nave en t−dt con el objetivo en t provocaba un error fijo de ~22 km
+  al mantener posición junto a un planeta a 30 km/s.
+
+## ADR-018 — El cliente solo lee fotos y solo escribe comandos
+
+- **Decisión:** `SystemSnapshot` es la única vista del estado para la presentación, y `PilotCommand` la
+  única vía de cambio. Las naves se extrapolan para dibujarlas entre pasos gruesos.
+- **Consecuencias:** la partida del cliente es idéntica a la headless (los tests del `Sandbox` cubren el
+  mismo código que juega el usuario) y se puede guardar, cargar y reproducir.
+
+## ADR-019 — Inspector de entidades generado a partir de `io`
+
+- **Decisión:** los archivos aceptan `io("nombre", campo)`. El formato binario ignora el nombre y un
+  `InspectArchive` lo pasa a un `FieldVisitor`. Los enums con `toString` muestran su nombre.
+- **Consecuencias:** cada componente describe sus campos una sola vez para guardado, hash e inspector. El
+  inspector del cliente (y los futuros inspectores de guardado o economía) salen gratis.
+
+## ADR-020 — Vuelo: estados de cuerpos memorizados por paso; grain 256
+
+- **Medición** (`sim.sandbox`, 200 cargueros): el pase de objetivos resolvía una órbita por nave y costaba
+  67 µs/paso con 12 hilos. Memorizar el estado de cada cuerpo una vez por paso (bajo demanda) lo deja en
+  16,6 µs/paso (×4). Con 13 naves, de 8,1 a 4,2 µs/paso.
+- **Medición:** con 200 naves, repartir el pase de naves entre hilos era más lento que hacerlo en serie
+  (~40 ns por nave). Se sube el grain a 256: el paralelismo empieza con miles de naves.

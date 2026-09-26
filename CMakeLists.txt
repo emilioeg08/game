@@ -26,6 +26,7 @@ option(GX_FORCE_ASSERTS "Enable GX_ASSERT in optimized builds" OFF)
 option(GX_ENABLE_PROFILING "Compile profiling zones (they can still be disabled at runtime)" ON)
 option(GX_BUILD_TESTS "Build unit tests" ON)
 option(GX_BUILD_BENCHMARKS "Build benchmarks" ON)
+option(GX_BUILD_CLIENT "Build the graphical client (downloads SDL3 and Dear ImGui at configure time)" ON)
 
 include(cmake/GxCompileOptions.cmake)
 
@@ -33,7 +34,12 @@ find_package(Threads REQUIRED)
 
 add_subdirectory(Engine)
 add_subdirectory(Simulation)
+add_subdirectory(Space)
+add_subdirectory(Game)
 add_subdirectory(Scenarios)
+if(GX_BUILD_CLIENT)
+    add_subdirectory(ThirdParty)
+endif()
 add_subdirectory(Apps)
 
 if(GX_BUILD_BENCHMARKS)

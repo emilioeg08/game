@@ -3,10 +3,12 @@
 Motor propio en C++20 para un sandbox 4X de simulación galáctica persistente: la galaxia existe, cambia y
 produce consecuencias aunque el jugador no la esté mirando.
 
-**Estado: M1 (Simulation Kernel).** Encima de la fase 0 (core, reloj, Job System, kernel headless,
-profiling) ya hay entidades y componentes, eventos, comandos, guardado y carga versionados, replay y
-cambio de frecuencia de los sistemas (LOD lógico). Todavía no hay contenido de juego: la carga de trabajo es
-sintética. El nombre y el namespace (`gx`) son provisionales.
+**Estado: M2.1 (Sistema estelar jugable).** Hay un primer juego: un sistema estelar generado con órbitas
+keplerianas, tu nave (autopiloto o empuje newtoniano manual), cargueros NPC que viajan solos entre puertos,
+tiempo acelerable, guardado rápido e inspector de entidades. Por debajo están el kernel de M1 (entidades,
+eventos, comandos, save/load, replay, LOD por frecuencia) y la fase 0. El diseño es provisional
+([docs/DESIGN.md](docs/DESIGN.md)) hasta que exista `game.md`. El nombre y el namespace (`gx`) también son
+provisionales.
 
 ## Requisitos (Windows)
 
@@ -32,6 +34,21 @@ python -m pip install -r tools/requirements-build.txt
 Presets: `debug` (sin optimizar, con asserts), `release` (optimizado, para benchmarks) y `profile`
 (optimizado con asserts e información de depuración). Los binarios quedan en `build/<preset>/bin/`.
 
+## Jugar
+
+```powershell
+./build/release/bin/gx_game.exe                 # sistema de la semilla 2400
+./build/release/bin/gx_game.exe --seed 77       # otro sistema
+```
+
+Controles: rueda = zoom · arrastrar = mover · clic = seleccionar · **clic derecho = ir allí** ·
+WASD = empuje manual · X = frenar · Espacio = pausa · 1–7 = velocidad del tiempo · H/F = seguir ·
+F5/F9 = guardar/cargar · F3 = depuración · F1 = ayuda. La primera configuración descarga SDL3 y Dear ImGui
+(versiones fijadas); `-DGX_BUILD_CLIENT=OFF` compila sin el cliente.
+
+Modo captura para comprobaciones automáticas:
+`gx_game.exe --frames 60 --prerun-hours 30 --select --screenshot captura.png`.
+
 ## Ejecutar la simulación headless
 
 ```powershell
@@ -56,17 +73,22 @@ Presets: `debug` (sin optimizar, con asserts), `release` (optimizado, para bench
 ```text
 Engine/        Core, Memory, Math, Jobs, Time, Profiling, Serialization
 Simulation/    Kernel (scheduler, paso, save/load), World (entidades), Events, Commands
+Space/         Orbits (Kepler), Bodies, Ships (vuelo y autopiloto), Generation (sistemas estelares)
+Game/          Sandbox (escenario jugable y contenido provisional), Presentation (SystemSnapshot)
 Scenarios/     cargas sintéticas para tests y benchmarks (no contenido de juego)
-Apps/          gx_headless
+Apps/          gx_game (cliente SDL3 + ImGui), gx_headless
+ThirdParty/    SDL3 y Dear ImGui (FetchContent con hash)
 Benchmarks/    gx_bench
-Tests/         gx_tests (13 suites en CTest)
-docs/          ARCHITECTURE.md, DECISIONS.md, BENCHMARKS.md
+Tests/         gx_tests (15 suites en CTest)
+docs/          DESIGN.md, ARCHITECTURE.md, DECISIONS.md, BENCHMARKS.md
 cmake/ scripts/ tools/
 ```
 
 ## Documentación
 
-- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md): capas, tiempo, pipeline, threading, entidades, eventos,
-  comandos, persistencia, determinismo, LOD, referencias, contradicciones y riesgos.
-- [docs/DECISIONS.md](docs/DECISIONS.md): registro de decisiones (ADR-001 a ADR-015).
+- [docs/DESIGN.md](docs/DESIGN.md): diseño de juego provisional (escala, generación, vuelo, naves, NPC,
+  controles).
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md): capas, tiempo, pipeline, presentación, threading,
+  entidades, eventos, comandos, persistencia, determinismo, LOD, referencias, contradicciones y riesgos.
+- [docs/DECISIONS.md](docs/DECISIONS.md): registro de decisiones (ADR-001 a ADR-020).
 - [docs/BENCHMARKS.md](docs/BENCHMARKS.md): método y resultados medidos por hito.

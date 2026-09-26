@@ -67,6 +67,11 @@ public:
 
     template <typename T>
     void io(const T& value);
+    // Named form used by components so debug tools can label fields; the binary layout ignores the name.
+    template <typename T>
+    void io(std::string_view /*name*/, const T& value) {
+        io(value);
+    }
 
     // Writes tag, version and a size placeholder; endChunk patches the size.
     ChunkMark beginChunk(u32 tag, u32 version);
@@ -107,6 +112,10 @@ public:
 
     template <typename T>
     void io(T& value);
+    template <typename T>
+    void io(std::string_view /*name*/, T& value) {
+        io(value);
+    }
 
     // Reads a chunk header and checks its tag. Fails (and returns false) on mismatch or truncation.
     bool beginChunk(u32 expectedTag, Chunk& chunk);

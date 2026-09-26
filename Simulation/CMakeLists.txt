@@ -10,6 +10,7 @@ add_library(gx_simulation STATIC
     World/ComponentStore.h
     World/EntityRegistry.cpp
     World/EntityRegistry.h
+    World/Inspect.h
     World/World.cpp
     World/World.h
 )

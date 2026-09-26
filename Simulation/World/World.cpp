@@ -35,6 +35,14 @@ ComponentStoreBase* World::findStore(std::string_view name) const {
     return nullptr;
 }
 
+void World::inspect(EntityId entity, FieldVisitor& visitor) const {
+    for (const auto& store : m_stores) {
+        if (store->contains(entity)) {
+            store->inspect(entity, visitor);
+        }
+    }
+}
+
 void World::write(BinaryWriter& writer) const {
     m_registry.write(writer);
     writer.writeU32(static_cast<u32>(m_stores.size()));

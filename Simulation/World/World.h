@@ -57,6 +57,9 @@ public:
     // Requires the same component registrations as the writer; any mismatch fails the reader.
     void read(BinaryReader& reader);
 
+    // Every component of the entity, in registration order (entity inspector).
+    void inspect(EntityId entity, FieldVisitor& visitor) const;
+
 private:
     template <typename T>
     static const void* typeKey() {

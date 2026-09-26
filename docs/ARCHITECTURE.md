@@ -1,7 +1,8 @@
 # Arquitectura del motor — GalaxyEngine
 
-> Estado: **M1 (Simulation Kernel) completado** sobre la fase 0. Este documento describe lo que existe y
-> las reglas que el código posterior debe respetar. Las secciones marcadas *(plan)* son diseño aún no
+> Estado: **M2.1 (Sistema estelar jugable)** sobre M1 y la fase 0: ya hay juego (cliente gráfico) encima del
+> motor. Este documento describe lo que existe y las reglas que el código posterior debe respetar. El diseño
+> de juego provisional está en [DESIGN.md](DESIGN.md). Las secciones marcadas *(plan)* son diseño aún no
 > implementado. Las decisiones y su justificación están en [DECISIONS.md](DECISIONS.md); las mediciones,
 > en [BENCHMARKS.md](BENCHMARKS.md).
 
@@ -24,20 +25,24 @@ depurabilidad → moddabilidad → presentación.
 ## 2. Capas y dependencias
 
 ```text
- Apps/Headless   Benchmarks   Tests                      ejecutables
-        └──────┬──────┴──────────┘
-               ▼
-          Scenarios/                                      cargas sintéticas (NO contenido de juego)
-               ▼
+ Apps/Game (gx_game)          cliente gráfico: SDL3 + Dear ImGui (ThirdParty/), solo presentación y entrada
+ Apps/Headless · Benchmarks · Tests                      ejecutables sin ventana
+        │
+ Game/     Sandbox (escenario jugable) · Presentation (SystemSnapshot) · contenido provisional
+ Scenarios/                                              cargas sintéticas (NO contenido de juego)
+        │
+ Space/    Orbits · Bodies · Ships (vuelo) · Generation  dominio espacial
+        │
  Simulation/  Kernel · World · Events · Commands          estado autoritativo y bucle de pasos
-               ▼
+        │
  Engine/  Core · Memory · Math · Jobs · Time · Profiling · Serialization
 ```
 
 Reglas:
 
-- Las dependencias solo van hacia abajo. `Engine` nunca incluye `Simulation`; `Simulation` nunca incluye
-  render, input ni UI.
+- Las dependencias solo van hacia abajo. `Engine` nunca incluye `Simulation`; `Simulation`, `Space` y
+  `Game` nunca incluyen render, input ni UI. **Solo `Apps/Game` enlaza SDL3 e ImGui**: el motor, la
+  simulación, el juego y los tests compilan y corren sin dependencias externas (`-DGX_BUILD_CLIENT=OFF`).
 - El render futuro será un **consumidor** de la fase `PresentationSnapshot`, nunca una dependencia de la
   simulación.
 - Los sistemas de juego reales vivirán en `Simulation/<Dominio>` y `Space/<Dominio>` a medida que existan.
@@ -57,10 +62,17 @@ Reglas:
 | `Simulation/World` | `EntityId` generacional, `EntityRegistry`, `ComponentStore<T>` (sparse set), `World` |
 | `Simulation/Events` | `EventChannel<T>`, `EventBus` (emisión serie y paralela, despacho con cascadas) |
 | `Simulation/Commands` | `CommandQueue` (entrada externa serializada, grabación para replay) |
+| `Space/Orbits` | órbitas keplerianas analíticas (solver de Kepler con Newton protegido) |
+| `Space/Bodies` | `CelestialBody`, `OrbitsParent`, estado absoluto por la cadena de padres |
+| `Space/Ships` | componentes de nave, autopiloto (`steer`), `FlightSystem` (dos pases, eventos `ShipArrived`) |
+| `Space/Generation` | generación procedural del sistema estelar (datos puros) y creación de entidades |
+| `Game/Sandbox` | escenario jugable: jugador, cargueros NPC, `PilotCommand`, diario, LOD de vuelo |
+| `Game/Presentation` | `SystemSnapshot`: foto de solo lectura para el cliente |
 | `Scenarios` | `SyntheticGalaxy`: movimiento, economía, comercio, convoyes (entidades, eventos y comandos) y reducción global |
 | `Apps/Headless` | `gx_headless`: simulación, `--save/--load/--inspect/--record/--replay/--raids` |
+| `Apps/Game` | `gx_game`: cliente gráfico (mapa, paneles, inspector, guardado rápido, modo captura) |
 | `Benchmarks` | `gx_bench`: motor, almacenamiento de entidades, escalado, grain, save/load |
-| `Tests` | framework mínimo + 13 suites en CTest (88 tests) |
+| `Tests` | framework mínimo + 15 suites en CTest (104 tests) |
 
 ## 4. Modelo de tiempo
 
@@ -98,6 +110,20 @@ fin de paso         cambios de frecuencia diferidos, descarte de eventos, recogi
 ```
 
 Dentro de una fase, los sistemas se ejecutan en orden de registro.
+
+## 5b. Presentación y cliente
+
+- El cliente **no toca el estado vivo**: lee un `SystemSnapshot` (cuerpos, naves, rumbos) construido una vez
+  por frame, y **solo cambia la simulación con comandos** (`PilotCommand`). Así la partida es igual de
+  determinista, guardable y reproducible con o sin ventana.
+- **Interpolación visual**: las naves se integran en pasos de 1 s (o de 100 ms), así que la foto las
+  extrapola con su velocidad hasta el instante actual. Los cuerpos son exactos (órbitas analíticas).
+- **Precisión**: la cámara trabaja en `double` y convierte a `float` relativo a su centro (origin rebasing
+  implícito), de modo que el zoom va de metros a decenas de UA sin temblores.
+- **Ritmo**: `TimeController` fija el objetivo de tiempo simulado y el cliente ejecuta `runUntil` con un
+  presupuesto de 8 ms por frame. Si la CPU no llega, la UI muestra la velocidad real conseguida.
+- **Modo captura** (`--frames N --screenshot x.png`): renderiza, guarda PNG y sale. Sirve para verificar la
+  presentación de forma automática.
 
 ## 6. Modelo de threading
 
@@ -177,7 +203,7 @@ ejecuta trabajos de la cola. `parallelFor` reparte los chunks con un contador at
 
 ## 11. Contrato de determinismo
 
-**Garantizado hoy** (suites `Determinism`, `Kernel`, `Events`, `Commands` y `SaveLoad`; columna `det` del
+**Garantizado hoy** (suites `Determinism`, `Kernel`, `Events`, `Commands`, `SaveLoad` y `Sandbox`; columna `det` del
 benchmark; `--replay`): con el mismo binario, la misma plataforma, la misma semilla y configuración y la
 misma secuencia de comandos, el hash del estado es idéntico **sea cual sea** el número de hilos, la
 velocidad del tiempo, el troceado de la ejecución o si hubo un guardado y una carga por el camino.
@@ -187,7 +213,8 @@ velocidad del tiempo, el troceado de la ejecución o si hubo un guardado y una c
 ## 12. LOD lógico
 
 Implementado: el mecanismo de **frecuencia** (scheduler multi-rate más `setSystemPeriod` con continuidad
-temporal). *(Plan)* las **representaciones**:
+temporal) y su **primer uso real**: el vuelo pasa de 1 s a 100 ms cuando el jugador pilota a mano y vuelve a
+1 s al dejarlo, por comando y de forma determinista. *(Plan)* las **representaciones**:
 
 | LOD | Representación | Frecuencia orientativa |
 |---|---|---|
@@ -263,3 +290,9 @@ solo como referencia conceptual: la interfaz, los nombres y los assets serán or
 8. **Carga sintética poco representativa.** La IA, los sensores y la política reales tendrán otros
    patrones de coste.
 9. **Solo verificado en Windows/MSVC.**
+10. **Techo de aceleración del tiempo del sandbox.** Con pasos de vuelo de 1 s: ~×236.000 con 13 naves y
+    ~×60.000 con 200 (`sim.sandbox`). Para simular meses por segundo con cientos de naves hará falta un LOD
+    de vuelo más grueso durante el crucero (tramos analíticos).
+11. **Dependencias descargadas al configurar.** SDL3 e ImGui se descargan de GitHub (versiones y SHA-256
+    fijados) la primera vez que se configura cada preset. Sin red, usar `-DGX_BUILD_CLIENT=OFF`.
+12. **Diseño provisional.** Todo el diseño de juego es mío hasta que exista `game.md` (DESIGN.md).

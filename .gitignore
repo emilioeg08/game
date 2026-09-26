@@ -15,3 +15,7 @@
 /.vs/
 /.idea/
 CMakeUserPresets.json
+
+# Graphical client runtime files
+/saves/
+imgui.ini

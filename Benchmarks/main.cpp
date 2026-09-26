@@ -100,6 +100,7 @@ int main(int argc, char** argv) {
         {"sim.scaling", &benchSimulationScaling},
         {"sim.grain", &benchGrain},
         {"sim.saveload", &benchSaveLoad},
+        {"sim.sandbox", &benchSandbox},
     };
 
     Report report;

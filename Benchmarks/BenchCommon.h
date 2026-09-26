@@ -78,6 +78,7 @@ void benchJobScaling(Report& report, const Options& options);
 void benchSimulationScaling(Report& report, const Options& options);
 void benchGrain(Report& report, const Options& options);
 void benchSaveLoad(Report& report, const Options& options);
+void benchSandbox(Report& report, const Options& options);
 // World
 void benchEntityStorage(Report& report, const Options& options);
 

@@ -123,3 +123,22 @@ Día ms, mediana de 5. Dos de las cuatro ejecuciones (las otras dos, en ADR-015,
 - **Guardar es barato**: ~20 ms para 10.000 sistemas. Con autosave cada pocos minutos de juego no se nota.
 - **Build usado**: la primera ejecución de Release fue bloqueada por Smart App Control y los experimentos
   iniciales se hicieron en Profile. Todas las tablas de esta sección son de Release.
+
+## M2.1 — Sandbox jugable (2026-09-26)
+
+`gx_bench --filter sim.sandbox`, Release: un sistema generado (semilla 2400), la nave del jugador y N
+cargueros, vuelo estratégico a 1 s y comportamiento de los cargueros cada minuto. Se miden 5 días simulados
+(432.000 pasos).
+
+| Cargueros | Hilos | µs/paso | Días simulados/s | Velocidad máxima sostenible |
+|---|---|---|---|---|
+| 12 | 1 | 4,2 | 2,7 | ~×236.000 |
+| 12 | 12 | 4,2 | 2,7 | ~×236.000 |
+| 200 | 1 | 16,6 | 0,70 | ~×60.000 |
+| 200 | 12 | 16,7 | 0,69 | ~×60.000 |
+
+Antes de optimizar (ADR-020): 8,1 µs/paso con 12 cargueros y 67 µs/paso con 200 (12 hilos).
+
+**Lectura:** con los botones ×1 a ×100K el sandbox va a la velocidad pedida; con ×1M la UI indica
+"limitado por CPU" (~×236.000 real). El siguiente salto no vendrá de más hilos (hay poco trabajo por paso)
+sino de dar menos pasos: LOD de vuelo con tramos analíticos durante el crucero.

@@ -4,6 +4,7 @@
 #include "Engine/Jobs/JobSystem.h"
 #include "Engine/Serialization/Binary.h"
 #include "Simulation/World/EntityRegistry.h"
+#include "Simulation/World/Inspect.h"
 
 #include <span>
 #include <string>
@@ -28,6 +29,8 @@ public:
     virtual void clear() = 0;
     virtual void write(BinaryWriter& writer) const = 0;
     virtual void read(BinaryReader& reader) = 0;
+    // Describes the entity's component to a debug tool. Requires contains(entity).
+    virtual void inspect(EntityId entity, FieldVisitor& visitor) const = 0;
 
 private:
     std::string m_name;
@@ -96,6 +99,9 @@ public:
     [[nodiscard]] T* tryGet(EntityId entity) {
         return contains(entity) ? &m_values[m_sparse[entity.index]] : nullptr;
     }
+    [[nodiscard]] const T* tryGet(EntityId entity) const {
+        return contains(entity) ? &m_values[m_sparse[entity.index]] : nullptr;
+    }
 
     [[nodiscard]] std::span<T> values() { return m_values; }
     [[nodiscard]] std::span<const T> values() const { return m_values; }
@@ -136,6 +142,11 @@ public:
             }
             add(entity, std::move(value));
         }
+    }
+
+    void inspect(EntityId entity, FieldVisitor& visitor) const override {
+        InspectArchive archive(visitor);
+        archive.io(name(), get(entity));
     }
 
 private:
