@@ -1,9 +1,9 @@
 # Arquitectura del motor — GalaxyEngine
 
-> Estado: **Fase 0 (Foundation) completada**. Este documento describe lo que existe y las reglas que el
-> código posterior debe respetar. Las secciones marcadas *(plan)* son diseño aún no implementado.
-> Las decisiones y su justificación están en [DECISIONS.md](DECISIONS.md); las mediciones, en
-> [BENCHMARKS.md](BENCHMARKS.md).
+> Estado: **M1 (Simulation Kernel) completado** sobre la fase 0. Este documento describe lo que existe y
+> las reglas que el código posterior debe respetar. Las secciones marcadas *(plan)* son diseño aún no
+> implementado. Las decisiones y su justificación están en [DECISIONS.md](DECISIONS.md); las mediciones,
+> en [BENCHMARKS.md](BENCHMARKS.md).
 
 `GalaxyEngine` y el namespace `gx` son nombres provisionales hasta que `game.md` defina el nombre del juego.
 
@@ -14,24 +14,24 @@ depurabilidad → moddabilidad → presentación.
 
 | Principio | Cómo se hace cumplir hoy |
 |---|---|
-| Simulación sin render | `Simulation/` no depende de nada gráfico; `gx_headless` corre la simulación completa. |
-| Determinismo | Tiempo entero, RNG entero por *stream*, chunks fijos, reducciones ordenadas, `/fp:precise`. Tests + hash de estado lo verifican. |
-| Medir primero | Profiler desde el día 1, `gx_bench` con JSON, columna de determinismo en cada escala. |
-| No construir todo de golpe | Solo existe la fase 0. No se crean carpetas vacías de la estructura sugerida. |
-| Correctitud | `GX_CHECK` siempre activo para invariantes; `GX_ASSERT` en Debug/Profile; warnings como errores. |
+| Simulación sin render | `Simulation/` no depende de nada gráfico; `gx_headless` corre, guarda, carga y reproduce la simulación completa. |
+| Determinismo | Tiempo entero, RNG entero por *stream*, chunks fijos, reducciones ordenadas, eventos fusionados en orden de chunk, comandos con marca de tiempo, `/fp:precise`. Tests, hash de estado y replay lo verifican. |
+| Causalidad | Los efectos viajan por mecanismos explícitos: los excedentes crean convoyes (eventos → entidades), los convoyes entregan carga al llegar y los raids la destruyen. Nada aparece "por arte de magia". |
+| Medir primero | Profiler, `gx_bench` con JSON y experimentos medidos para las decisiones (almacenamiento de entidades, grain). |
+| No construir todo de golpe | Solo existen la fase 0 y M1. No se crean carpetas vacías de la estructura sugerida. |
+| Correctitud | `GX_CHECK` siempre activo para invariantes; `GX_ASSERT` en Debug y Profile; warnings como errores; la entrada externa se valida y nunca se da por buena. |
 
 ## 2. Capas y dependencias
 
 ```text
- Apps/Headless   Benchmarks   Tests          ejecutables
-        │             │          │
+ Apps/Headless   Benchmarks   Tests                      ejecutables
         └──────┬──────┴──────────┘
                ▼
-          Scenarios/                          cargas sintéticas (NO contenido de juego)
+          Scenarios/                                      cargas sintéticas (NO contenido de juego)
                ▼
-     Simulation/Kernel                        reloj autoritativo + scheduler + bucle de pasos
+ Simulation/  Kernel · World · Events · Commands          estado autoritativo y bucle de pasos
                ▼
- Engine/  Core · Memory · Math · Jobs · Time · Profiling
+ Engine/  Core · Memory · Math · Jobs · Time · Profiling · Serialization
 ```
 
 Reglas:
@@ -44,182 +44,222 @@ Reglas:
 
 ## 3. Módulos existentes
 
-| Módulo | Contenido | Notas |
-|---|---|---|
-| `Engine/Core` | tipos, plataforma, `GX_CHECK`/`GX_ASSERT`, logging con sinks, hash (FNV-1a, `StateHasher`), RNG (SplitMix64 + xoshiro256**) | RNG y hash verificados contra vectores de referencia publicados. |
-| `Engine/Memory` | `LinearArena` (bump allocator por paso) | Scratch por paso del kernel. |
-| `Engine/Math` | `Vec3d` | Solo operaciones correctamente redondeadas en rutas deterministas. |
-| `Engine/Jobs` | `JobSystem`: pool fijo, `submit/wait`, `parallelFor`, `parallelReduce` | Ver §6. |
-| `Engine/Time` | `SimTime`/`SimDuration` (µs enteros), `SimClock`, `TimeController`, calendario, `Stopwatch` | Ver §4. |
-| `Engine/Profiling` | zonas con `GX_PROFILE_SCOPE`, agregados, exportación a Chrome trace, memoria del proceso, estadísticas (p50/p95/p99) | Ver §9. |
-| `Simulation/Kernel` | `SystemScheduler` multi-rate, `Simulation` (paso, `runUntil`, presupuesto de tiempo real) | Headless por construcción. |
-| `Scenarios` | `SyntheticGalaxy`: carga sintética con movimiento, economía, comercio y reducción global | Solo para tests y benchmarks. |
-| `Apps/Headless` | `gx_headless`: simulación sin UI, sin ritmo o al ritmo del reloj real (`--speed`) | Traza Perfetto con `--trace`. |
-| `Benchmarks` | `gx_bench` | Escalas de 1 a 10.000 sistemas. |
-| `Tests` | framework mínimo propio + 8 suites registradas en CTest | |
+| Módulo | Contenido |
+|---|---|
+| `Engine/Core` | tipos, plataforma, `GX_CHECK`/`GX_ASSERT`, logging con sinks, hash (FNV-1a, `StateHasher`, `hashBytes`), RNG (SplitMix64 + xoshiro256**) verificado contra vectores de referencia |
+| `Engine/Memory` | `LinearArena` (scratch por paso) |
+| `Engine/Math` | `Vec3d` |
+| `Engine/Jobs` | `JobSystem`: pool fijo, `submit/wait`, `parallelFor`, `parallelReduce` |
+| `Engine/Time` | `SimTime`/`SimDuration` (µs enteros), `SimClock`, `TimeController`, calendario, `Stopwatch` |
+| `Engine/Profiling` | zonas, agregados, exportación a Chrome trace, memoria del proceso, estadísticas |
+| `Engine/Serialization` | `BinaryWriter`/`BinaryReader` (little-endian, chunks versionados), fichero de guardado con checksum y escritura atómica |
+| `Simulation/Kernel` | `SystemScheduler` multi-rate con cambio de frecuencia, `Simulation` (paso, `runUntil`, save/load, hash de estado) |
+| `Simulation/World` | `EntityId` generacional, `EntityRegistry`, `ComponentStore<T>` (sparse set), `World` |
+| `Simulation/Events` | `EventChannel<T>`, `EventBus` (emisión serie y paralela, despacho con cascadas) |
+| `Simulation/Commands` | `CommandQueue` (entrada externa serializada, grabación para replay) |
+| `Scenarios` | `SyntheticGalaxy`: movimiento, economía, comercio, convoyes (entidades, eventos y comandos) y reducción global |
+| `Apps/Headless` | `gx_headless`: simulación, `--save/--load/--inspect/--record/--replay/--raids` |
+| `Benchmarks` | `gx_bench`: motor, almacenamiento de entidades, escalado, grain, save/load |
+| `Tests` | framework mínimo + 13 suites en CTest (88 tests) |
 
 ## 4. Modelo de tiempo
 
 **Tiempo entero.** `SimTime` son microsegundos en `i64` desde la época de la campaña, con un rango de
-±292.000 años. No acumula deriva en campañas largas y es idéntico bit a bit en cualquier plataforma. Solo
-se convierte a `double` en el borde (el `dt` de un integrador).
+±292.000 años. No acumula deriva y es idéntico bit a bit en cualquier plataforma.
 
 **Scheduler multi-rate.** Cada sistema declara su periodo y un desfase opcional, y se ejecuta sobre su
-propia rejilla (`alta + offset + k·periodo`). El kernel **salta directamente al siguiente instante en que
-algún sistema toca**:
+propia rejilla. El kernel salta directamente al siguiente instante en que toca un sistema **o un comando**.
+Los sistemas estratégicos no cuestan nada entre ejecuciones: un año con un sistema horario son 8.760 pasos.
+Cada sistema recibe como `dt` el tiempo real transcurrido desde su última ejecución.
 
-- los sistemas estratégicos (economía horaria, política diaria) no cuestan nada entre ejecuciones: un año
-  con solo un sistema horario son 8.760 pasos, no 31,5 millones de ticks (test `Kernel.IdleTimeIsSkipped`);
-- los sistemas tácticos (combate, física) solo cuestan mientras están registrados;
-- cada sistema recibe `dt` = tiempo desde su última ejecución, que siempre es exacto.
+**Cambio de frecuencia (LOD lógico).** `Simulation::setSystemPeriod` cambia el ritmo de un sistema. La
+siguiente ejecución ocurre un periodo nuevo después de la última (o un periodo nuevo después de ahora, si
+eso ya pasó), y el `dt` cubre todo el intervalo: ningún microsegundo se pierde ni se cuenta dos veces (test
+`Kernel.RateSwitchKeepsTimeContinuity`). Si el cambio se pide durante un paso, se aplica al final del paso.
 
-**Aceleración y pausa.** `TimeController` convierte tiempo real en un *objetivo* de tiempo simulado
-(velocidad entera, pausa, arrastre de restos inferiores al µs, tope de retraso). Acelerar significa **más
-pasos por segundo real, nunca un `dt` mayor**, así que cualquier velocidad, framerate o patrón de pausa
-produce exactamente el mismo estado. `Simulation::runUntil(target, presupuesto)` puede cortarse por
-presupuesto de tiempo real y reanudarse sin alterar el resultado (test `Kernel.ResultDoesNotDependOnHowTheRunIsSliced`).
+**Aceleración y pausa.** `TimeController` convierte tiempo real en un objetivo de tiempo simulado.
+Acelerar significa más pasos por segundo real, nunca un `dt` mayor. `runUntil(target, presupuesto)` puede
+cortarse y reanudarse sin alterar el resultado.
 
-**Calendario provisional.** 12 meses con la duración gregoriana y años de 365 días sin bisiestos, con año
-de época configurable (las referencias visuales muestran fechas del tipo "January 2352"). El calendario
-definitivo lo decide `game.md`.
+**Calendario provisional.** 12 meses con la duración gregoriana, años de 365 días y año de época
+configurable. El calendario definitivo lo decide `game.md`.
 
 ## 5. Pipeline de un paso
 
-Dentro de un instante, los sistemas debidos se ejecutan por fase y, dentro de cada fase, en orden de
-registro. Es la secuencia del prompt maestro §9:
+```text
+avanzar el reloj al siguiente instante debido (sistema o comando)
+Commands            comandos pendientes con executeAt <= ahora, luego sistemas de la fase
+Simulation          sistemas paralelos: leen estado compartido, escriben solo estado propio
+Synchronization     aplican efectos cruzados guardados en buffers
+EventResolution     suscriptores de eventos (con cascadas), luego sistemas de la fase
+History             leen los eventos del paso (registro histórico: plan M4)
+PresentationSnapshot publicación de solo lectura para render/UI (plan)
+fin de paso         cambios de frecuencia diferidos, descarte de eventos, recogida del profiler
+```
 
-| Fase | Uso |
-|---|---|
-| `Commands` | aplicar comandos del jugador y de la IA (entrada determinista) |
-| `Simulation` | actualización paralela: leer estado compartido y escribir **solo estado propio** |
-| `Synchronization` | aplicar efectos cruzados guardados en buffers (p. ej., flujos de comercio) |
-| `EventResolution` | resolver eventos emitidos en el paso *(plan M1)* |
-| `History` | registrar acontecimientos *(plan M4)* |
-| `PresentationSnapshot` | publicar estado de solo lectura para render/UI/inspectores *(plan)* |
-
-Al final de cada paso: el arena de scratch se reinicia y el profiler recoge las zonas.
+Dentro de una fase, los sistemas se ejecutan en orden de registro.
 
 ## 6. Modelo de threading
 
-`JobSystem` usa un pool fijo (hardware − 1 workers, más el hilo que espera). Mientras un hilo espera en
-`wait()`, ejecuta trabajos de la cola: el hilo principal nunca queda ocioso y el paralelismo anidado no
-puede bloquearse. `parallelFor` reparte los chunks con un contador atómico, de modo que solo se encola un
-trabajo auxiliar por worker y no uno por chunk.
+`JobSystem` usa un pool fijo (hardware − 1 workers, más el hilo que espera). Mientras un hilo espera,
+ejecuta trabajos de la cola. `parallelFor` reparte los chunks con un contador atómico.
 
 **Reglas obligatorias para código paralelo de simulación:**
 
 1. En la fase `Simulation`, un sistema escribe solo en índices que le pertenecen. Puede leer datos ajenos
    que nadie modifique en esa fase.
-2. Los efectos sobre otras entidades se escriben en buffers y se aplican en `Synchronization`, con el
-   patrón de doble buffer que ejemplifica `SyntheticGalaxy`.
-3. El `grain` de `parallelFor` es una constante de configuración y **nunca se deriva del número de hilos**:
-   los límites de los chunks dependen solo de `(count, grain)`.
-4. La aleatoriedad sale de `Rng::forStream(seed, entidad, ejecución)`. Nunca se comparte un generador
-   entre trabajos.
-5. Las sumas y demás reducciones en coma flotante se hacen con `parallelReduce`, que combina los
-   resultados parciales en orden de chunk.
+2. Los efectos sobre otras entidades van por buffers (aplicados en `Synchronization`) o por eventos
+   (resueltos en `EventResolution`).
+3. **Los cambios estructurales** (crear o destruir entidades, añadir o quitar componentes) **solo ocurren
+   en el hilo principal**: en los handlers de comandos, en los suscriptores de eventos o entre pasos. Los
+   sistemas paralelos solo modifican valores in situ.
+4. El `grain` de `parallelFor` es una constante de configuración y nunca se deriva del número de hilos.
+5. La aleatoriedad sale de `Rng::forStream(worldSeed, entidad, ejecución)`.
+6. Las reducciones en coma flotante se hacen con `parallelReduce`. Los eventos emitidos en paralelo usan
+   `emitFromChunk(begin / grain, …)`.
 
-## 7. Contrato de determinismo
+## 7. Entidades y estado
 
-**Garantizado hoy** (verificado por las suites `Determinism` y `Kernel` y por la columna `det` del
-benchmark): con el mismo binario, la misma plataforma, la misma semilla, la misma configuración y la misma
-secuencia de comandos, el hash del estado es idéntico, **sea cual sea** el número de hilos, la velocidad del
-tiempo o la forma de trocear la ejecución.
+- **`EntityId`** = índice de slot + generación. Al destruir una entidad se incrementa la generación de su
+  slot, así que un id obsoleto se detecta en lugar de apuntar a otra entidad. Los slots libres se reutilizan
+  en orden FIFO, lo que retrasa la reutilización y es determinista.
+- **`ComponentStore<T>`** (sparse set): valores densos y contiguos, búsqueda por id en O(1) y borrado por
+  intercambio con el último. El orden de iteración depende solo de la secuencia de operaciones.
+- **`World`**: registro de entidades más un almacén por tipo de componente, registrado con un **nombre
+  estable** (el que usan los guardados). `destroyEntity` quita la entidad de todos los almacenes.
+- No hay maquinaria genérica de consultas ni de sistemas: cada sistema recorre el almacén que conduce y
+  busca los demás por id. Es una decisión medida (ADR-011).
+- El estado que no es de entidades (arrays densos por sistema estelar, por ejemplo) se registra como
+  **bloque de estado** con nombre (`Simulation::addStateBlock`) y se guarda igual que el resto.
 
-**No garantizado todavía:** el mismo resultado con compiladores o CPUs distintos. Mitigaciones activas:
-`/fp:precise` y `-ffp-contract=off` (sin FMA implícito), nada de funciones trascendentes de libm en
-estado determinista, RNG solo con enteros y calendario entero. Si más adelante se necesitan replays
-multiplataforma o multijugador lockstep, el estado crítico deberá pasar a punto fijo. Es una decisión
-aplazada (ver DECISIONS.md, ADR-005).
+## 8. Eventos
 
-## 8. LOD lógico *(plan)*
+- Los eventos existen **durante un paso**: se emiten en cualquier fase, se despachan a los suscriptores al
+  comienzo de `EventResolution`, las fases posteriores los pueden leer (`History`) y se descartan al final
+  del paso. Nunca se guardan, porque los guardados se hacen entre pasos.
+- Los suscriptores se ejecutan en el hilo principal, por canal en orden de registro y en orden de
+  suscripción. Pueden emitir más eventos (cascadas), que se procesan en pasadas sucesivas. Si una cascada
+  no converge en 16 pasadas, falla un `GX_CHECK`.
+- En emisión paralela, cada chunk tiene su buffer y los buffers se concatenan en orden de chunk, de modo
+  que el orden final no depende del número de hilos (test `Events.ParallelEmissionOrderIsIndependentOfThreadCount`).
 
-El scheduler multi-rate es el mecanismo base: cada LOD es una combinación de **frecuencia** y
-**representación**.
+## 9. Comandos y replay
+
+- Un **comando** es entrada externa (jugador, UI, script, red), serializada en el momento de enviarse, con
+  `executeAt` y un número de secuencia.
+- Los comandos **siempre se ejecutan estrictamente en el futuro** (al menos 1 µs después del instante
+  actual), al comienzo de la fase `Commands` del paso de ese instante y en orden `(executeAt, secuencia)`.
+  Así el mismo registro reproduce exactamente la misma simulación, tanto en vivo como en replay.
+- Los handlers **validan** los datos del comando: los comandos inválidos se rechazan y se cuentan, nunca
+  abortan la simulación.
+- Grabación: `commands().setRecording(true)` y luego `recorded()`. Replay: `submitRecord()` de cada
+  registro sobre una simulación nueva. `gx_headless --record/--replay` lo hace desde la línea de comandos y
+  compara el hash final.
+
+## 10. Persistencia
+
+- **Payload** (`Simulation::saveState`): chunks `KRNL` (semilla, reloj, contadores), `SCHD` (estado de
+  cada sistema por nombre: periodo, desfase, última ejecución, siguiente vencimiento), `CMDQ` (comandos
+  pendientes), `WRLD` (registro de entidades más un chunk por almacén de componentes) y `BLKS` (bloques de
+  estado).
+- **Fichero**: *magic* + cabecera (versión del formato, versión del motor, descripción) + payload protegido
+  por tamaño y hash. Se escribe en `.tmp` y se renombra (escritura atómica). `gx_headless --inspect`
+  muestra la cabecera y los chunks.
+- **Compatibilidad**: la carga exige las **mismas registraciones** (sistemas, componentes, tipos de
+  comando, bloques). Cualquier diferencia se rechaza con un mensaje claro. Dentro de un chunk, los campos
+  añadidos al final por versiones más nuevas se saltan (compatibilidad hacia delante). La migración entre
+  versiones de contenido está pendiente (§15).
+- **Hash de estado** = hash del payload. Si dos simulaciones tienen el mismo hash, son la misma simulación.
+  Esto garantiza que el hash cubre exactamente lo que se guarda.
+- Verificado: guardar, cargar y continuar da el mismo hash que una ejecución continua, y cargar y volver a
+  guardar produce los mismos bytes (suite `SaveLoad`; `gx_headless` de extremo a extremo; benchmark
+  `sim.saveload`).
+
+## 11. Contrato de determinismo
+
+**Garantizado hoy** (suites `Determinism`, `Kernel`, `Events`, `Commands` y `SaveLoad`; columna `det` del
+benchmark; `--replay`): con el mismo binario, la misma plataforma, la misma semilla y configuración y la
+misma secuencia de comandos, el hash del estado es idéntico **sea cual sea** el número de hilos, la
+velocidad del tiempo, el troceado de la ejecución o si hubo un guardado y una carga por el camino.
+
+**No garantizado todavía:** el mismo resultado con compiladores o CPUs distintos (ADR-005).
+
+## 12. LOD lógico
+
+Implementado: el mecanismo de **frecuencia** (scheduler multi-rate más `setSystemPeriod` con continuidad
+temporal). *(Plan)* las **representaciones**:
 
 | LOD | Representación | Frecuencia orientativa |
 |---|---|---|
 | 0 Abstracto | organizaciones y regiones como números agregados | diaria / semanal |
 | 1 Regional | sistemas y flotas agregadas (composición, no naves) | horaria |
-| 2 Sistema | astros sobre **raíles keplerianos analíticos** (posición = f(t), sin integrar), naves simplificadas | minutos |
-| 3 Local | naves individuales integradas (como el movimiento de `SyntheticGalaxy`) | segundos |
+| 2 Sistema | astros sobre **raíles keplerianos analíticos** (posición = f(t)), naves simplificadas | minutos |
+| 3 Local | naves individuales integradas | segundos |
 | 4 Tiempo real | combate, física, daño por componente | 20–50 ms |
 
-Las transiciones deben conservar el estado. Una flota agregada guarda su composición (naves y resumen de
-salud por componente) y se materializa de forma determinista a partir de ese estado y de su *stream* de
-RNG. Al desmaterializarse vuelve a agregarse. **Evidencia medida:** sin LOD, 10.000 sistemas con todo
-integrado cada minuto simulado dan unos 3 días simulados por segundo, así que un año simulado tarda unos 2
-minutos. El LOD es imprescindible para simular años.
+Una flota agregada guardará su composición y se materializará de forma determinista a partir de ese estado
+y de su *stream* de RNG. **Evidencia medida:** sin LOD, 10.000 sistemas con todo integrado cada minuto dan
+unos 3 días simulados por segundo, así que un año simulado tarda unos 2 minutos.
 
-## 9. Espacio y precisión *(plan, fase 2)*
+## 13. Espacio y precisión *(plan, fase 2)*
 
-Se usarán coordenadas jerárquicas, que es lo que exige el zoom continuo de estrella a sistema visto en las
-referencias:
+Coordenadas jerárquicas, como exige el zoom continuo visto en las referencias:
 
-- **Galaxia:** posición de cada sistema en `double`. A 10⁵ años luz (~10²¹ m) la resolución es de unos
-  100 km, así que **nunca** se guardan naves en coordenadas galácticas.
-- **Sistema:** metros en `double` relativos a la estrella. A 40 UA (~6·10¹² m) la resolución es del orden
-  del milímetro.
+- **Galaxia:** posición de cada sistema en `double`. A 10⁵ años luz la resolución es de unos 100 km, así
+  que nunca se guardan naves en coordenadas galácticas.
+- **Sistema:** metros en `double` relativos a la estrella. A 40 UA la resolución es de ~1 mm.
 - **Local/táctico:** *origin rebasing* alrededor del foco para física fina y render en `float`.
 
-Antes de comprometer la solución se hará un experimento pequeño y medido.
+## 14. Profiling y herramientas
 
-## 10. Entidades y datos *(plan M1)*
+- `GX_PROFILE_SCOPE("Nombre")`: unos 65 ns activado y menos de 1 ns desactivado. Solo en zonas gruesas.
+- `gx_headless --trace x.json` → <https://ui.perfetto.dev>.
+- **Save Inspector** (mínimo): `gx_headless --inspect partida.gxsave`.
+- Inspectores del §26 del prompt *(plan)*: consumirán `PresentationSnapshot` y consultas de depuración.
 
-No hay ECS: el patrón actual son arrays SoA dentro de cada sistema. En M1 se decidirá, con un experimento
-medido, entre *handles* generacionales sobre tablas SoA por tipo o un ECS mínimo. Se separará identidad,
-estado, comportamiento, representación y persistencia. El contenido (naves, módulos, bienes…) será datos
-desde el principio, para que sea moddable.
-
-## 11. Profiling y herramientas
-
-- `GX_PROFILE_SCOPE("Nombre")`. Coste medido: unos 65 ns activado y menos de 1 ns desactivado. **Solo en
-  zonas gruesas** (sistema, lote de chunks), nunca por entidad.
-- `parallelFor` registra la parte de trabajo de cada hilo, de modo que la traza muestra el uso real de los
-  workers.
-- `gx_headless --trace x.json` → abrir en <https://ui.perfetto.dev>.
-- Inspectores del §26 del prompt *(plan)*: consumirán `PresentationSnapshot` y consultas de depuración, no
-  el estado vivo.
-
-## 12. Análisis de las referencias visuales
+## 15. Análisis de las referencias visuales
 
 Se recibieron 4 capturas (en el chat; la carpeta `referencias/` no existe en el repositorio). Se usan
 solo como referencia conceptual: la interfaz, los nombres y los assets serán originales.
 
 | Referencia | Qué muestra | Implicación técnica |
 |---|---|---|
-| Universo continuo | zoom desde el mapa interestelar hasta el sistema; órbitas, cinturón de asteroides con cientos de cuerpos, población por cuerpo, flotas coloreadas por facción | coordenadas jerárquicas (§9); astros sobre raíles analíticos; población agregada; lo que se ve depende de los sensores y no del estado real |
-| Planetas simulados | superficies en rejilla hexagonal con biomas y depósitos de recursos | generación bajo demanda desde el *stream* del planeta y persistencia **solo de las diferencias**: no se puede tener cada superficie en memoria |
-| Editor de nave | casillas de módulos con daño individual, estadísticas derivadas (masa, tripulación, firma, detección pasiva), velocidad en hiperespacio y subluminal, tripulación con modificadores y costes de reparación | daño por subsistema (§12 del prompt); estadísticas recalculadas cuando cambian y no en cada tick; módulos definidos como datos; dos regímenes de movimiento |
-| Vista de sistema | planetas, colonias y estaciones con población, controles de tiempo (pausa, x1, avanzar), fecha con meses, HUD de nave con sensores activos/pasivos y transpondedor | `TimeController` (hecho); calendario con meses (hecho, provisional); identidad y transpondedor como parte del modelo de sensores |
+| Universo continuo | zoom desde el mapa interestelar hasta el sistema; órbitas, cinturón de asteroides con cientos de cuerpos, población por cuerpo, flotas coloreadas por facción | coordenadas jerárquicas (§13); astros sobre raíles analíticos; población agregada; lo que se ve depende de los sensores y no del estado real |
+| Planetas simulados | superficies en rejilla hexagonal con biomas y depósitos de recursos | generación bajo demanda desde el *stream* del planeta y persistencia **solo de las diferencias** |
+| Editor de nave | casillas de módulos con daño individual, estadísticas derivadas, hiperespacio y subluminal, tripulación con modificadores | daño por subsistema; estadísticas recalculadas cuando cambian y no en cada tick; módulos como datos; dos regímenes de movimiento |
+| Vista de sistema | colonias y estaciones con población, controles de tiempo, fecha con meses, HUD con sensores y transpondedor | `TimeController` y calendario con meses (hechos); identidad y transpondedor dentro del modelo de sensores |
 
-## 13. Contradicciones y huecos detectados
+## 16. Contradicciones y huecos detectados
 
 | # | Contradicción o hueco | Resolución |
 |---|---|---|
-| 1 | Faltan `game.md`, `CLAUDE.md` y `referencias/` | La fase 0 no depende de ellos. Las decisiones de contenido (calendario, nombres, escalas, reglas) quedan marcadas como provisionales. |
-| 2 | `game.md` propone Godot 4 (según el prompt) | Queda reemplazado por el motor propio en C++ (ADR-001). No se ha podido revisar el resto de la sección porque el archivo no está. |
-| 3 | El "primer vertical slice" (§5) incluye economía, comercio, IA, save/load y pilotar una nave, lo que abarca las fases 1 a 4 del roadmap (§32); el orden del §4 no incluye render ni input | El slice es el objetivo de los hitos M1 a M4. El render mínimo de depuración entra en M2 como capa separada. |
-| 4 | "Determinista cuando sea posible" + multithreading + `double` | Determinismo garantizado con el mismo binario y plataforma e independiente de los hilos; el multiplataforma queda aplazado (§7). |
-| 5 | Tiempo acelerable a "años" + combate en tiempo real | Un tick fijo único no sirve (años a 20 Hz son unos 630 millones de ticks por año). Se resuelve con tiempo entero y scheduler multi-rate (§4). |
-| 6 | La estructura sugerida (§6) incluye `Engine/ECS`, pero se pide "ECS solo si es útil" | No hay ECS; la decisión se tomará midiendo en M1 (§10). |
-| 7 | Se piden métricas de guardado, carga y eventos desde el primer benchmark | No existen hasta M1; el benchmark las marca como no disponibles. |
-| 8 | La estructura sugerida no tiene sitio para el kernel, las cargas sintéticas, las apps, los benchmarks ni los tests | Se añaden `Simulation/Kernel`, `Scenarios/`, `Apps/`, `Benchmarks/` y `Tests/`. No se crean carpetas vacías. |
+| 1 | Faltan `game.md`, `CLAUDE.md` y `referencias/` | La fase 0 y M1 no dependen de ellos. Las decisiones de contenido quedan marcadas como provisionales. |
+| 2 | `game.md` propone Godot 4 (según el prompt) | Queda reemplazado por el motor propio en C++ (ADR-001). |
+| 3 | El "primer vertical slice" (§5) abarca las fases 1 a 4 del roadmap; el orden del §4 no incluye render ni input | El slice es el objetivo de los hitos M1 a M4. El render mínimo de depuración entra en M2 como capa separada. |
+| 4 | "Determinista cuando sea posible" + multithreading + `double` | Determinismo garantizado con el mismo binario y plataforma; el multiplataforma queda aplazado (§11). |
+| 5 | Tiempo acelerable a "años" + combate en tiempo real | Tiempo entero y scheduler multi-rate (§4). |
+| 6 | La estructura sugerida incluye `Engine/ECS`, pero se pide "ECS solo si es útil" | Almacenes densos por tipo en `Simulation/World`, sin maquinaria ECS genérica; decisión medida (ADR-011). |
+| 7 | Métricas de guardado, carga y eventos desde el primer benchmark | Disponibles desde M1 (`sim.saveload` y columna `events`). |
+| 8 | La estructura sugerida no tiene sitio para el kernel, las cargas sintéticas, las apps, los benchmarks ni los tests | Se añaden `Simulation/Kernel`, `Scenarios/`, `Apps/`, `Benchmarks/` y `Tests/`. |
 
-## 14. Riesgos abiertos
+## 17. Riesgos abiertos
 
 1. **Documentos de autoridad ausentes.** Cualquier sistema de juego (M2+) necesita `game.md`.
-2. **Repositorio dentro de OneDrive.** OneDrive sincroniza `build/` (cientos de MB) y puede bloquear
-   ficheros durante el enlazado, y `.git` dentro de OneDrive es frágil. Recomendación: mover el
-   repositorio a una ruta local (p. ej., `C:\dev\Game`) y usar un remoto git como copia de seguridad.
-3. **Granularidad de los chunks.** Con `motionGrain = 4096`, 16.000 cuerpos son solo 4 chunks, de modo
-   que se usan 4 de los 12 hilos y el speedup a 1.000 sistemas es de ×2,5. Hay que ajustar el grain por
-   sistema midiendo.
-4. **Cola única del Job System.** Basta con trabajos gruesos (fork/join p50 ≈ 2 µs), pero si aparecen
-   miles de trabajos pequeños por paso habrá contención. Se añadirá *work-stealing* solo si el benchmark
-   lo demuestra.
-5. **Latencias de cola.** El paso máximo llega a ~1,4 ms con 10k sistemas (planificación del SO), frente
-   a un p95 de ~0,4 ms. Hay que vigilarlo cuando haya presupuesto de frame.
-6. **Carga sintética poco representativa.** La IA, los sensores y la política reales tendrán otros
-   patrones de coste y memoria. Los números de la fase 0 validan el mecanismo, no el juego.
-7. **Solo verificado en Windows/MSVC.** Las rutas de Linux y macOS están escritas pero no se han compilado.
+2. **Smart App Control bloquea binarios recién compilados.** Windows bloquea de forma intermitente algunos
+   ejecutables locales sin firmar (le ha ocurrido a `gx_bench` en Release y a `gx_tests` en Debug y
+   Profile). Cada compilación puede recibir un veredicto distinto. Hay que decidir cómo desarrollar con esta
+   protección (es una configuración de seguridad del usuario).
+3. **Ruido de medición.** Entre ejecuciones del benchmark hay variaciones de hasta un ±30 % en algunas
+   celdas (SMT, frecuencia de la CPU, sincronización de OneDrive). Las decisiones deben basarse en efectos
+   consistentes entre varias ejecuciones, no en una sola tabla.
+4. **Repositorio dentro de OneDrive.** Sincroniza `build/` y `.git`, lo que añade ruido y riesgo de
+   bloqueos. Recomendación: mover el repositorio a una ruta local.
+5. **Compatibilidad de guardados estricta.** Cualquier cambio de registraciones invalida las partidas
+   anteriores. Hará falta un mecanismo de migración antes de tener contenido real.
+6. **La carga no es transaccional.** Si `loadState` falla a mitad, la simulación queda inconsistente y se
+   debe descartar (documentado en la API; `gx_headless` sale).
+7. **Cola única del Job System.** Suficiente con trabajos gruesos; *work-stealing* solo si se mide
+   contención.
+8. **Carga sintética poco representativa.** La IA, los sensores y la política reales tendrán otros
+   patrones de coste.
+9. **Solo verificado en Windows/MSVC.**

@@ -19,6 +19,13 @@ public:
         m_now = time;
     }
 
+    // Loading a save: the only way to move the clock arbitrarily.
+    void restore(SimTime start, SimTime now) {
+        GX_CHECK(now >= start, "restored clock is before its start");
+        m_start = start;
+        m_now = now;
+    }
+
 private:
     SimTime m_start;
     SimTime m_now;

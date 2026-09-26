@@ -3,7 +3,7 @@
 Ejecutar siempre en Release:
 
 ```powershell
-./scripts/build.ps1 -Bench          # completo (~5 s)
+./scripts/build.ps1 -Bench          # completo (~20 s)
 ./scripts/build.ps1 -Bench -Quick   # hasta 1.000 sistemas
 ./build/release/bin/gx_bench.exe --filter sim.scaling --threads 6
 ```
@@ -59,7 +59,7 @@ se mide 1 día simulado (1.440 pasos) tras 1 hora de calentamiento.
 - **Determinismo:** el hash con 12 hilos coincide con el de 1 hilo en todas las escalas.
 - **Memoria:** no es el límite (10,5 MiB para 160.000 cuerpos). El límite es el coste por paso.
 - **Sin LOD, 10.000 sistemas dan ~3 días simulados por segundo**, es decir, ~2 minutos por año simulado.
-  Esto justifica el LOD lógico (ARCHITECTURE.md §8): los astros deben ir sobre raíles analíticos y las
+  Esto justifica el LOD lógico (ARCHITECTURE.md §12): los astros deben ir sobre raíles analíticos y las
   flotas lejanas deben agregarse.
 - **El paralelismo a escala media está limitado por el grain:** con 1.000 sistemas, el movimiento solo
   tiene 4 chunks (grain 4.096), así que trabajan 4 hilos y el speedup es de ×2,5. Es el primer ajuste
@@ -67,3 +67,59 @@ se mide 1 día simulado (1.440 pasos) tras 1 hora de calentamiento.
 - **Colas:** el paso máximo es 3–7 veces el p95 (planificación del SO). Aún no importa en headless, pero
   sí cuando exista un presupuesto de frame.
 - **Aún no disponibles:** guardado, carga y eventos (hito M1).
+
+## M1 — Simulation Kernel (2026-09-26)
+
+Misma máquina, preset `release` y 12 hilos. **La carga cambió respecto a la fase 0**: ahora incluye
+convoyes (entidades creadas por eventos, movidas cada minuto y destruidas al llegar), comandos y despacho de
+eventos en cada paso, así que no es comparable celda a celda con la tabla anterior. `motionGrain` pasó de
+4096 a 1024 (ADR-015). Rangos de dos ejecuciones consecutivas.
+
+### Simulación sintética con convoyes (1 día simulado)
+
+| Sistemas | Cuerpos | Convoyes en vuelo | Eventos/día | Paso p50 µs | Día ms | Días sim/s | Speedup vs 1 hilo | Determinista |
+|---|---|---|---|---|---|---|---|---|
+| 100 | 1.600 | 100 | 100 | 9 | 14 | ~70 | ~1,0 | sí |
+| 1.000 | 16.000 | 953 | 965 | 26–31 | 41–57 | 17–24 | 2,6–3,3 | sí |
+| 5.000 | 80.000 | 4.670 | 4.634 | 82–113 | 133–199 | 5–7,5 | 3,5–5,2 | sí |
+| 10.000 | 160.000 | 9.430 | 9.367 | 169–191 | 277–325 | 3,1–3,6 | 4,4–5,1 | sí |
+
+A pesar de la carga añadida, 1.000 sistemas escalan mejor que en la fase 0 (×2,6–3,3 frente a ×2,5) gracias
+al nuevo grain.
+
+### Guardado y carga (tras 1 día simulado; el round trip se verifica continuando 6 h)
+
+| Sistemas | Entidades | Payload MiB | Serializar ms | Escribir fichero ms | Leer fichero ms | Cargar ms | Coincide |
+|---|---|---|---|---|---|---|---|
+| 1.000 | 1.196 | 1,10 | 1,8–2,7 | 2,0 | 2,2 | 0,6–1,3 | sí |
+| 10.000 | 11.894 | 10,94 | 20–22 | 8–10 | 17–19 | 7–8 | sí |
+
+### Experimento: almacenamiento de entidades (ADR-011)
+
+Un hilo, ns por entidad, mediana de 5–11 repeticiones.
+
+| Entidades | Denso | Structs grandes | Objetos virtuales (heap) | `unordered_map` | Búsqueda densa | Búsqueda en map | Churn World | Churn map |
+|---|---|---|---|---|---|---|---|---|
+| 10.000 | 1,6 | 2,5 | 3,6 | 11,8 | 2,8 | 18,5 | 43 | 196 |
+| 100.000 | 1,4 | 5,3 | 24,8 | 115,2 | 2,9 | 91,1 | 282 | 528 |
+| 1.000.000 | 6,6 | 14,3 | 38,9 | 122,7 | 29,7 | 110,1 | 377 | 643 |
+
+### Experimento: grain del movimiento (ADR-015)
+
+Día ms, mediana de 5. Dos de las cuatro ejecuciones (las otras dos, en ADR-015, muestran el mismo patrón):
+
+| Sistemas | 256 | 512 | 1024 | 2048 | 4096 | 8192 |
+|---|---|---|---|---|---|---|
+| 100 | 17,1 / 14,3 | 15,9 / 11,7 | **12,6 / 10,5** | 14,8 / 14,7 | 14,3 / 13,3 | 13,8 / 13,2 |
+| 1.000 | 58,9 / 38,8 | 53,8 / 49,1 | **50,8 / 59,9** | 50,8 / 55,8 | 60,2 / 61,3 | 81,7 / 87,0 |
+| 10.000 | 391 / 338 | 349 / 355 | **356 / 342** | 350 / 333 | 351 / 345 | 337 / 352 |
+
+### Lectura
+
+- **El determinismo se mantiene** con entidades, eventos paralelos, comandos, guardado y carga, en todas
+  las escalas.
+- **El ruido es alto** en esta máquina (±20–30 % en algunas celdas). Las decisiones se tomaron con efectos
+  consistentes entre ejecuciones.
+- **Guardar es barato**: ~20 ms para 10.000 sistemas. Con autosave cada pocos minutos de juego no se nota.
+- **Build usado**: la primera ejecución de Release fue bloqueada por Smart App Control y los experimentos
+  iniciales se hicieron en Profile. Todas las tablas de esta sección son de Release.

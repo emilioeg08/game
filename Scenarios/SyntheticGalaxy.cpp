@@ -2,8 +2,10 @@
 
 #include "Engine/Core/Assert.h"
 #include "Engine/Core/Hash.h"
+#include "Engine/Core/Log.h"
 #include "Engine/Core/Random.h"
 #include "Engine/Jobs/JobSystem.h"
+#include "Engine/Serialization/Binary.h"
 #include "Simulation/Kernel/Simulation.h"
 
 #include <algorithm>
@@ -20,7 +22,11 @@ constexpr u64 kEconomyStream = fnv1a64("synthetic.economy");
 constexpr f64 kDisruptionChance = 0.01; // per good per economy tick
 constexpr f64 kPriceElasticity = 0.05;
 constexpr f64 kTradeRate = 0.1;
-constexpr f64 kTargetStockHours = 24.0; // desired stock: one day of consumption
+constexpr f64 kTargetStockHours = 24.0;   // desired stock: one day of consumption
+constexpr f64 kConvoySurplusHours = 72.0; // stock above three days of consumption may be shipped
+constexpr f64 kConvoyChance = 0.05;       // per surplus good per economy tick
+constexpr f64 kMinTravelHours = 12.0;
+constexpr f64 kMaxTravelHours = 240.0;
 
 template <typename T>
 usize bytesOf(const std::vector<T>& v) {
@@ -32,7 +38,8 @@ usize bytesOf(const std::vector<T>& v) {
 SyntheticGalaxy::SyntheticGalaxy(const SyntheticGalaxyConfig& config) : m_config(config) {
     GX_CHECK(config.starSystems > 0 && config.bodiesPerSystem > 0 && config.goodsPerSystem > 0,
              "synthetic galaxy needs systems, bodies and goods");
-    GX_CHECK(config.motionGrain > 0 && config.systemGrain > 0, "grains must be positive");
+    GX_CHECK(config.motionGrain > 0 && config.systemGrain > 0 && config.convoyGrain > 0,
+             "grains must be positive");
     const u64 bodies = static_cast<u64>(config.starSystems) * config.bodiesPerSystem;
     const u64 goods = static_cast<u64>(config.starSystems) * config.goodsPerSystem;
     GX_CHECK(bodies <= std::numeric_limits<u32>::max() && goods <= std::numeric_limits<u32>::max(),
@@ -84,26 +91,46 @@ SyntheticGalaxy::SyntheticGalaxy(const SyntheticGalaxyConfig& config) : m_config
     }
 }
 
-void SyntheticGalaxy::registerSystems(Simulation& simulation) {
-    simulation.addSystem(
-        {"Synthetic.Motion", TickPhase::Simulation, m_config.motionPeriod, {}, [this](const TickContext& c) {
-             updateMotion(c);
-         }});
-    simulation.addSystem({"Synthetic.Economy",
-                          TickPhase::Simulation,
-                          m_config.economyPeriod,
-                          {},
-                          [this](const TickContext& c) { updateEconomy(c); }});
-    simulation.addSystem({"Synthetic.TradeCompute",
-                          TickPhase::Simulation,
-                          m_config.economyPeriod,
-                          {},
-                          [this](const TickContext& c) { computeTrade(c); }});
-    simulation.addSystem({"Synthetic.TradeApply",
-                          TickPhase::Synchronization,
-                          m_config.economyPeriod,
-                          {},
-                          [this](const TickContext& c) { applyTrade(c); }});
+void SyntheticGalaxy::install(Simulation& simulation) {
+    World& world = simulation.world();
+    m_world = &world;
+    world.registerComponent<SyntheticConvoy>("Synthetic.Convoy");
+    world.registerComponent<SyntheticTransit>("Synthetic.Transit");
+
+    EventBus& events = simulation.events();
+    events.registerEvent<ConvoyRequested>("Synthetic.ConvoyRequested")
+        .subscribe([this](const ConvoyRequested& e, const TickContext& c) {
+            spawnConvoy(c.world, e.origin, e.destination, e.good, e.cargo, e.travelHours);
+        });
+    events.registerEvent<ConvoyArrived>("Synthetic.ConvoyArrived")
+        .subscribe(
+            [this](const ConvoyArrived& e, const TickContext& c) { deliverConvoy(c.world, e.convoy); });
+
+    CommandQueue& commands = simulation.commands();
+    commands.registerCommand<SpawnConvoyCommand>(
+        "Synthetic.SpawnConvoy",
+        [this](const SpawnConvoyCommand& cmd, const TickContext& c) { onSpawnCommand(cmd, c); });
+    commands.registerCommand<RaidConvoysCommand>(
+        "Synthetic.RaidConvoys",
+        [this](const RaidConvoysCommand& cmd, const TickContext& c) { onRaidCommand(cmd, c); });
+
+    const auto add = [&](const char* name, TickPhase phase, SimDuration period,
+                         void (SyntheticGalaxy::*update)(const TickContext&)) {
+        simulation.addSystem(
+            {name, phase, period, {}, [this, update](const TickContext& c) { (this->*update)(c); }});
+    };
+    add("Synthetic.Motion", TickPhase::Simulation, m_config.motionPeriod, &SyntheticGalaxy::updateMotion);
+    add("Synthetic.Economy", TickPhase::Simulation, m_config.economyPeriod, &SyntheticGalaxy::updateEconomy);
+    add("Synthetic.TradeCompute", TickPhase::Simulation, m_config.economyPeriod,
+        &SyntheticGalaxy::computeTrade);
+    add("Synthetic.ConvoyMotion", TickPhase::Simulation, m_config.motionPeriod,
+        &SyntheticGalaxy::moveConvoys);
+    add("Synthetic.TradeApply", TickPhase::Synchronization, m_config.economyPeriod,
+        &SyntheticGalaxy::applyTrade);
+
+    simulation.addStateBlock(
+        "Synthetic.Galaxy", [this](BinaryWriter& w) { writeState(w); },
+        [this](BinaryReader& r) { readState(r); });
 }
 
 void SyntheticGalaxy::updateMotion(const TickContext& context) {
@@ -127,11 +154,18 @@ void SyntheticGalaxy::updateMotion(const TickContext& context) {
 
 void SyntheticGalaxy::updateEconomy(const TickContext& context) {
     const f64 hours = context.dt.toHours();
+    const u32 systems = m_config.starSystems;
     const u32 goods = m_config.goodsPerSystem;
-    const u64 streamSeed = hashCombine(m_config.seed, kEconomyStream);
+    const u32 grain = m_config.systemGrain;
+    const u64 streamSeed = hashCombine(context.worldSeed, kEconomyStream);
+    const bool shipConvoys = m_config.convoys && systems > 1;
+    EventChannel<ConvoyRequested>& requests = context.events.channel<ConvoyRequested>();
+
+    requests.beginParallel(JobSystem::chunkCount(systems, grain));
     context.jobs.parallelFor(
-        m_config.starSystems, m_config.systemGrain,
+        systems, grain,
         [&](u32 begin, u32 end) {
+            const u32 chunk = begin / grain;
             for (u32 s = begin; s < end; ++s) {
                 // Randomness keyed by (system, run): independent of threads and execution order.
                 Rng rng = Rng::forStream(streamSeed, s, context.runIndex);
@@ -146,10 +180,24 @@ void SyntheticGalaxy::updateEconomy(const TickContext& context) {
                     const f64 target = m_consumption[k] * kTargetStockHours;
                     const f64 scarcity = std::clamp((target - m_stock[k]) / target, -1.0, 1.0);
                     m_price[k] = std::clamp(m_price[k] * (1.0 + kPriceElasticity * scarcity), 0.01, 1.0e6);
+
+                    // Large surpluses are shipped away. The cargo leaves this system's stock now (state this
+                    // system owns); the convoy entity is created by the event subscriber on the main thread.
+                    const f64 surplus = m_stock[k] - m_consumption[k] * kConvoySurplusHours;
+                    if (shipConvoys && surplus > 0.0 && rng.chance(kConvoyChance)) {
+                        u32 destination = rng.uniformU32(systems - 1);
+                        destination += destination >= s ? 1 : 0;
+                        const f64 cargo = surplus * 0.5;
+                        m_stock[k] -= cargo;
+                        requests.emitFromChunk(
+                            chunk, ConvoyRequested{s, destination, g, cargo,
+                                                   rng.uniform(kMinTravelHours, kMaxTravelHours)});
+                    }
                 }
             }
         },
         "Synthetic.Economy.Chunks");
+    requests.endParallel();
 }
 
 void SyntheticGalaxy::computeTrade(const TickContext& context) {
@@ -203,6 +251,138 @@ void SyntheticGalaxy::applyTrade(const TickContext& context) {
         [](f64 accumulated, f64 partial) { return accumulated + partial; }, "Synthetic.Output.Chunks");
 }
 
+void SyntheticGalaxy::moveConvoys(const TickContext& context) {
+    ComponentStore<SyntheticTransit>& transit = context.world.components<SyntheticTransit>();
+    if (transit.size() == 0) {
+        return;
+    }
+    const std::span<SyntheticTransit> values = transit.values();
+    const std::span<const EntityId> entities = transit.entities();
+    const auto count = static_cast<u32>(values.size());
+    const u32 grain = m_config.convoyGrain;
+    const f64 hours = context.dt.toHours();
+    EventChannel<ConvoyArrived>& arrivals = context.events.channel<ConvoyArrived>();
+
+    // Values are updated in place (each convoy owns its transit); arrivals are only reported: the entity is
+    // destroyed by the event subscriber, on the main thread, after this parallel loop.
+    arrivals.beginParallel(JobSystem::chunkCount(count, grain));
+    context.jobs.parallelFor(
+        count, grain,
+        [&](u32 begin, u32 end) {
+            const u32 chunk = begin / grain;
+            for (u32 i = begin; i < end; ++i) {
+                values[i].progress += values[i].progressPerHour * hours;
+                if (values[i].progress >= 1.0) {
+                    arrivals.emitFromChunk(chunk, ConvoyArrived{entities[i]});
+                }
+            }
+        },
+        "Synthetic.ConvoyMotion.Chunks");
+    arrivals.endParallel();
+}
+
+void SyntheticGalaxy::spawnConvoy(World& world, u32 origin, u32 destination, u32 good, f64 cargo,
+                                  f64 travelHours) {
+    const EntityId convoy = world.createEntity();
+    world.components<SyntheticConvoy>().add(convoy, {origin, destination, good, cargo});
+    world.components<SyntheticTransit>().add(convoy, {0.0, 1.0 / travelHours});
+    ++m_stats.convoysSpawned;
+}
+
+void SyntheticGalaxy::deliverConvoy(World& world, EntityId convoy) {
+    const SyntheticConvoy& route = world.components<SyntheticConvoy>().get(convoy);
+    m_stock[static_cast<usize>(route.destination) * m_config.goodsPerSystem + route.good] += route.cargo;
+    m_stats.cargoDelivered += route.cargo;
+    ++m_stats.convoysArrived;
+    world.destroyEntity(convoy);
+}
+
+void SyntheticGalaxy::onSpawnCommand(const SpawnConvoyCommand& command, const TickContext& context) {
+    // External input: validate, never trust.
+    const bool valid = command.origin < m_config.starSystems && command.destination < m_config.starSystems &&
+                       command.origin != command.destination && command.good < m_config.goodsPerSystem &&
+                       command.cargo > 0.0 && command.travelHours > 0.0 && std::isfinite(command.cargo) &&
+                       std::isfinite(command.travelHours);
+    if (!valid) {
+        ++m_stats.commandsRejected;
+        GX_LOG_WARN("Synthetic", "rejected invalid SpawnConvoy command");
+        return;
+    }
+    f64& originStock = m_stock[static_cast<usize>(command.origin) * m_config.goodsPerSystem + command.good];
+    const f64 cargo = std::min(command.cargo, originStock);
+    originStock -= cargo;
+    spawnConvoy(context.world, command.origin, command.destination, command.good, cargo, command.travelHours);
+}
+
+void SyntheticGalaxy::onRaidCommand(const RaidConvoysCommand& command, const TickContext& context) {
+    if (command.destination >= m_config.starSystems) {
+        ++m_stats.commandsRejected;
+        GX_LOG_WARN("Synthetic", "rejected invalid RaidConvoys command");
+        return;
+    }
+    const ComponentStore<SyntheticConvoy>& routes = context.world.components<SyntheticConvoy>();
+    // Collect first: destroying while iterating would reorder the dense store under the loop.
+    std::vector<EntityId> targets;
+    for (usize i = 0; i < routes.size(); ++i) {
+        if (routes.values()[i].destination == command.destination) {
+            targets.push_back(routes.entities()[i]);
+        }
+    }
+    for (const EntityId convoy : targets) {
+        m_stats.cargoLost += routes.get(convoy).cargo;
+        ++m_stats.convoysRaided;
+        context.world.destroyEntity(convoy);
+    }
+}
+
+void SyntheticGalaxy::writeState(BinaryWriter& writer) const {
+    writer.io(m_config.starSystems);
+    writer.io(m_config.bodiesPerSystem);
+    writer.io(m_config.goodsPerSystem);
+    writer.io(m_starGm);
+    writer.io(m_position);
+    writer.io(m_velocity);
+    writer.io(m_stock);
+    writer.io(m_price);
+    writer.io(m_production);
+    writer.io(m_consumption);
+    writer.io(m_tradeOut);
+    writer.io(m_galacticOutput);
+    writer.io(m_stats);
+}
+
+void SyntheticGalaxy::readState(BinaryReader& reader) {
+    u32 systems = 0;
+    u32 bodies = 0;
+    u32 goods = 0;
+    reader.io(systems);
+    reader.io(bodies);
+    reader.io(goods);
+    if (reader.ok() && (systems != m_config.starSystems || bodies != m_config.bodiesPerSystem ||
+                        goods != m_config.goodsPerSystem)) {
+        reader.fail("synthetic galaxy dimensions differ from the save");
+        return;
+    }
+    const usize bodyCount = m_position.size();
+    const usize goodCount = m_stock.size();
+    const auto readArray = [&](auto& array, usize expected) {
+        reader.io(array);
+        if (reader.ok() && array.size() != expected) {
+            reader.fail("synthetic galaxy array has the wrong length");
+        }
+    };
+    readArray(m_starGm, static_cast<usize>(systems));
+    readArray(m_position, bodyCount);
+    readArray(m_velocity, bodyCount);
+    readArray(m_stock, goodCount);
+    readArray(m_price, goodCount);
+    readArray(m_production, goodCount);
+    readArray(m_consumption, goodCount);
+    readArray(m_tradeOut, goodCount);
+    reader.io(m_galacticOutput);
+    reader.io(m_stats);
+}
+
 u64 SyntheticGalaxy::stateHash() const {
     StateHasher hasher;
     hasher.add(m_config.starSystems);
@@ -230,6 +410,14 @@ u64 SyntheticGalaxy::stateHash() const {
 usize SyntheticGalaxy::stateBytes() const {
     return bytesOf(m_starGm) + bytesOf(m_position) + bytesOf(m_velocity) + bytesOf(m_stock) +
            bytesOf(m_price) + bytesOf(m_production) + bytesOf(m_consumption) + bytesOf(m_tradeOut);
+}
+
+usize SyntheticGalaxy::activeConvoys() const {
+    return m_world != nullptr ? m_world->components<SyntheticTransit>().size() : 0;
+}
+
+f64 SyntheticGalaxy::stock(u32 system, u32 good) const {
+    return m_stock[static_cast<usize>(system) * m_config.goodsPerSystem + good];
 }
 
 } // namespace gx

@@ -3,6 +3,8 @@
 #include "Engine/Core/Types.h"
 
 #include <bit>
+#include <cstddef>
+#include <span>
 #include <string_view>
 #include <type_traits>
 
@@ -57,5 +59,25 @@ public:
 private:
     u64 m_hash = kFnv1aOffsetBasis;
 };
+
+// Checksum of a byte block (save payloads, serialized state), 8 bytes at a time. Length-sensitive.
+[[nodiscard]] inline u64 hashBytes(std::span<const std::byte> bytes) {
+    StateHasher hasher;
+    usize i = 0;
+    for (; i + 8 <= bytes.size(); i += 8) {
+        u64 word = 0;
+        for (usize b = 0; b < 8; ++b) {
+            word |= static_cast<u64>(static_cast<u8>(bytes[i + b])) << (8 * b);
+        }
+        hasher.addU64(word);
+    }
+    u64 tail = 0;
+    for (usize b = 0; i + b < bytes.size(); ++b) {
+        tail |= static_cast<u64>(static_cast<u8>(bytes[i + b])) << (8 * b);
+    }
+    hasher.addU64(tail);
+    hasher.addU64(static_cast<u64>(bytes.size()));
+    return hasher.value();
+}
 
 } // namespace gx

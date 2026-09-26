@@ -5,19 +5,24 @@
 
 #include <functional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace gx {
 
+class BinaryReader;
+class BinaryWriter;
+class EventBus;
 class JobSystem;
 class LinearArena;
+class World;
 
 // Fixed order of work inside one simulation step (docs/ARCHITECTURE.md, "Pipeline de un paso").
 enum class TickPhase : u8 {
-    Commands,             // apply queued player/AI commands
+    Commands,             // queued external commands are applied first, then systems of this phase
     Simulation,           // parallel updates: read shared state, write only state the system owns
     Synchronization,      // merge buffered cross-entity results (e.g. trade flows)
-    EventResolution,      // resolve events raised during the step
+    EventResolution,      // event subscribers run first, then systems of this phase
     History,              // record noteworthy events
     PresentationSnapshot, // publish read-only state for rendering/UI
     Count
@@ -27,18 +32,20 @@ enum class TickPhase : u8 {
 
 struct TickContext {
     SimTime now;    // instant being simulated
-    SimDuration dt; // time since this system last ran
+    SimDuration dt; // time since this system last ran (zero for commands and event handlers)
     u64 step;       // kernel step index
     u64 runIndex;   // times this system ran before (key for per-run random streams)
     u64 worldSeed;
     JobSystem& jobs;
     LinearArena& scratch; // reset at the start of every step
+    World& world;
+    EventBus& events;
 };
 
 using SystemUpdateFn = std::function<void(const TickContext&)>;
 
 struct SystemDesc {
-    std::string name;
+    std::string name; // unique; save files refer to systems by name
     TickPhase phase = TickPhase::Simulation;
     SimDuration period = SimDuration::seconds(1);
     // Shifts the schedule within [0, period) so costly systems sharing a period can be staggered.
@@ -74,7 +81,18 @@ public:
     void collectDue(SimTime time, std::vector<SystemId>& out) const;
     void markRan(SystemId id, SimTime time);
 
+    // Changes the rate of a system (logical LOD switch). The next run happens one new period after the last
+    // run (or one new period from `now` if that is already past), and it receives the real elapsed dt, so no
+    // simulated time is lost or counted twice.
+    void setPeriod(SystemId id, SimDuration period, SimTime now);
+
+    [[nodiscard]] SystemId find(std::string_view name) const;
     [[nodiscard]] const SystemState& system(SystemId id) const { return m_systems[id]; }
+
+    // Saves the schedule of every system by name. Loading requires the same set of systems (same names and
+    // phases) to be registered; periods, offsets and schedule positions come from the save.
+    void write(BinaryWriter& writer) const;
+    void read(BinaryReader& reader);
 
 private:
     std::vector<SystemState> m_systems;

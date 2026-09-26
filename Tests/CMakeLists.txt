@@ -1,20 +1,26 @@
 add_executable(gx_tests
     TestFramework.h
     TestMain.cpp
+    TestCommands.cpp
     TestCore.cpp
     TestDeterminism.cpp
+    TestEvents.cpp
     TestJobs.cpp
     TestKernel.cpp
     TestMemoryMath.cpp
     TestProfiling.cpp
+    TestSaveLoad.cpp
+    TestSerialization.cpp
     TestTime.cpp
+    TestWorld.cpp
 )
 
 target_link_libraries(gx_tests PRIVATE gx_scenarios)
 gx_configure_target(gx_tests)
 
 # One CTest entry per suite. gx_tests fails when a suite matches no test, so this list cannot silently drift.
-set(GX_TEST_SUITES Core Memory Math Jobs Time Profiling Kernel Determinism)
+set(GX_TEST_SUITES Core Memory Math Jobs Time Profiling Serialization World Events Commands Kernel SaveLoad
+    Determinism)
 foreach(suite IN LISTS GX_TEST_SUITES)
     add_test(NAME ${suite} COMMAND gx_tests --suite ${suite})
     set_tests_properties(${suite} PROPERTIES TIMEOUT 300)

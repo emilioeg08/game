@@ -6,6 +6,11 @@
 /bench-results/
 *.trace.json
 
+# Save games and replays produced by gx_headless
+*.gxsave
+*.gxsave.tmp
+*.gxreplay
+
 # IDE / local
 /.vs/
 /.idea/

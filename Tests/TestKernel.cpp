@@ -122,6 +122,46 @@ GX_TEST(Kernel, AddingSystemsDuringAStepIsRejected) {
     GX_EXPECT_EQ(simulation.scheduler().size(), 1u);
 }
 
+GX_TEST(Kernel, RateSwitchKeepsTimeContinuity) {
+    // A logical LOD switch: the same system runs every minute, then hourly, then every minute again.
+    JobSystem jobs(0);
+    Simulation simulation({}, jobs);
+    SimDuration integrated;
+    const SystemId id = simulation.addSystem(
+        {"Integrator", TickPhase::Simulation, SimDuration::minutes(1), {}, [&](const TickContext& c) {
+             integrated += c.dt;
+         }});
+    simulation.runUntil(SimTime::epoch() + SimDuration::minutes(10));
+    simulation.setSystemPeriod(id, SimDuration::hours(1)); // next run at 1h10
+    simulation.runUntil(SimTime::epoch() + SimDuration::hours(3));
+    simulation.setSystemPeriod(id, SimDuration::minutes(1)); // last run was 2h10: next at 3h01, dt = 51 min
+    simulation.runUntil(SimTime::epoch() + SimDuration::hours(3) + SimDuration::minutes(10));
+
+    const SystemState& state = simulation.scheduler().system(id);
+    GX_EXPECT_EQ(state.runCount, 10u + 2u + 10u);
+    // Every simulated microsecond was integrated exactly once.
+    GX_EXPECT(integrated == SimDuration::hours(3) + SimDuration::minutes(10));
+}
+
+GX_TEST(Kernel, RateChangesDuringAStepAreDeferred) {
+    JobSystem jobs(0);
+    Simulation simulation({}, jobs);
+    std::vector<SimTime> runs;
+    SystemId id = kInvalidSystemId;
+    id = simulation.addSystem(
+        {"SelfThrottling", TickPhase::Simulation, SimDuration::seconds(10), {}, [&](const TickContext& c) {
+             runs.push_back(c.now);
+             if (runs.size() == 2) {
+                 simulation.setSystemPeriod(id, SimDuration::seconds(100));
+             }
+         }});
+    simulation.runUntil(SimTime::epoch() + SimDuration::seconds(300));
+    const std::vector<SimTime> expected = {
+        SimTime::epoch() + SimDuration::seconds(10), SimTime::epoch() + SimDuration::seconds(20),
+        SimTime::epoch() + SimDuration::seconds(120), SimTime::epoch() + SimDuration::seconds(220)};
+    GX_EXPECT(runs == expected);
+}
+
 GX_TEST(Kernel, ResultDoesNotDependOnHowTheRunIsSliced) {
     SyntheticGalaxyConfig config;
     config.seed = 42;
@@ -134,10 +174,10 @@ GX_TEST(Kernel, ResultDoesNotDependOnHowTheRunIsSliced) {
         JobSystem jobs(2);
         SyntheticGalaxy galaxy(config);
         Simulation simulation({.seed = config.seed}, jobs);
-        galaxy.registerSystems(simulation);
+        galaxy.install(simulation);
         drive(simulation);
         GX_EXPECT(simulation.now() == end);
-        return std::pair{galaxy.stateHash(), simulation.stepCount()};
+        return std::pair{simulation.stateHash(), simulation.stepCount()};
     };
 
     const auto oneShot = run([&](Simulation& s) { s.runUntil(end); });

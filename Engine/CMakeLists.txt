@@ -19,6 +19,10 @@ add_library(gx_engine STATIC
     Profiling/Profiler.h
     Profiling/Statistics.cpp
     Profiling/Statistics.h
+    Serialization/Binary.cpp
+    Serialization/Binary.h
+    Serialization/SaveFile.cpp
+    Serialization/SaveFile.h
     Time/SimClock.h
     Time/SimTime.cpp
     Time/SimTime.h
