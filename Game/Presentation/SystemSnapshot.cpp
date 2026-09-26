@@ -19,6 +19,12 @@ const ShipView* SystemSnapshot::findShip(EntityId id) const {
     return it == ships.end() ? nullptr : &*it;
 }
 
+const ContactView* SystemSnapshot::findContact(u32 trackId) const {
+    const auto it = std::find_if(contacts.begin(), contacts.end(),
+                                 [trackId](const ContactView& c) { return c.trackId == trackId; });
+    return it == contacts.end() ? nullptr : &*it;
+}
+
 bool SystemSnapshot::positionOf(EntityId id, Vec3d& out) const {
     if (const ShipView* ship = findShip(id)) {
         out = ship->position;
@@ -51,6 +57,7 @@ void SnapshotBuilder::build(const Simulation& simulation, const Sandbox& sandbox
     out.time = now;
     out.bodies.clear();
     out.ships.clear();
+    out.contacts.clear();
 
     const ComponentStore<CelestialBody>& bodies = world.components<CelestialBody>();
     const ComponentStore<OrbitsParent>& orbits = world.components<OrbitsParent>();
@@ -62,6 +69,7 @@ void SnapshotBuilder::build(const Simulation& simulation, const Sandbox& sandbox
         view.name = body.name;
         view.kind = body.kind;
         view.radius = body.radius;
+        view.wellRadius = gravityWellRadius(body);
         view.position = bodyStateAt(world, id, now).position;
         if (const OrbitsParent* link = orbits.tryGet(id)) {
             view.parent = link->parent;
@@ -93,12 +101,43 @@ void SnapshotBuilder::build(const Simulation& simulation, const Sandbox& sandbox
         view.velocity = state->velocity;
         view.acceleration = state->acceleration;
         view.mode = control->mode;
+        view.phase = control->phase;
+        view.chargeRemaining = control->chargeRemaining;
         view.target = control->target;
         view.arrived = control->arrived;
         view.isPlayer = id == sandbox.playerShip();
         const TargetState target = resolveTarget(world, *control, now);
         view.targetPosition = target.valid ? target.position : view.position;
         out.ships.push_back(view);
+        if (view.isPlayer) {
+            out.playerFaction = identity.faction;
+            const SensorSuite* suite = world.components<SensorSuite>().tryGet(id);
+            const SignatureProfile* profile = world.components<SignatureProfile>().tryGet(id);
+            const ShipDrive* drive = world.components<ShipDrive>().tryGet(id);
+            if (suite != nullptr && profile != nullptr && drive != nullptr) {
+                out.playerSensors = *suite;
+                out.playerEmission = shipEmission(*profile, *drive, *state, *control, *suite);
+            }
+        }
+    }
+
+    for (const SensorContact& contact : sandbox.sensors().picture(out.playerFaction).contacts) {
+        ContactView view;
+        view.trackId = contact.trackId;
+        view.level = contact.level;
+        view.ageSeconds = (now - contact.lastSeen).toSeconds();
+        view.position = contact.position + contact.velocity * view.ageSeconds;
+        view.velocity = contact.velocity;
+        view.uncertainty = contact.uncertainty;
+        view.shipClass = contact.shipClass;
+        view.faction = contact.faction;
+        view.ghost = contact.ghost;
+        if (contact.level == ContactLevel::Identified) {
+            if (const ShipIdentity* identity = identities.tryGet(contact.target)) {
+                view.name = identity->name;
+            }
+        }
+        out.contacts.push_back(view);
     }
 }
 

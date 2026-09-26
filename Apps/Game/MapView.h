@@ -16,27 +16,45 @@ struct Camera {
     EntityId follow;
 };
 
+// What can be selected on the map: a real entity (body or own ship) or a sensor contact (track id).
+struct MapSelection {
+    EntityId entity;
+    u32 contact = 0;
+
+    [[nodiscard]] bool empty() const { return !entity.isValid() && contact == 0; }
+    bool operator==(const MapSelection&) const = default;
+};
+
+struct MapOptions {
+    bool showTruth = false; // debug: draw every ship where it really is, and mark ghost contacts
+};
+
 class MapView {
 public:
     struct Interaction {
         bool leftClicked = false;
-        EntityId leftClickedEntity; // invalid: clicked empty space
+        MapSelection leftClickedTarget; // empty: clicked empty space
         bool rightClicked = false;
-        EntityId rightClickedEntity;
+        MapSelection rightClickedTarget;
         Vec3d rightClickedPoint;
     };
 
     // Handles mouse input over the map (when ImGui does not want it) and draws the snapshot into the
-    // background draw list.
-    Interaction update(const SystemSnapshot& snapshot, EntityId selected);
+    // background draw list. Other factions' ships appear only as sensor contacts (unless showTruth).
+    Interaction update(const SystemSnapshot& snapshot, const MapSelection& selected,
+                       const MapOptions& options);
 
     [[nodiscard]] Camera& camera() { return m_camera; }
     [[nodiscard]] ImVec2 toScreen(const Vec3d& position) const;
     [[nodiscard]] Vec3d toWorld(ImVec2 screen) const;
 
 private:
-    [[nodiscard]] EntityId pick(const SystemSnapshot& snapshot, ImVec2 screen) const;
-    void draw(const SystemSnapshot& snapshot, EntityId selected, EntityId hovered);
+    [[nodiscard]] MapSelection pick(const SystemSnapshot& snapshot, ImVec2 screen,
+                                    const MapOptions& options) const;
+    void draw(const SystemSnapshot& snapshot, const MapSelection& selected, const MapSelection& hovered,
+              const MapOptions& options);
+    void drawContacts(ImDrawList& drawList, const SystemSnapshot& snapshot, const MapSelection& selected,
+                      const MapSelection& hovered, const MapOptions& options);
     void drawScaleBar(ImDrawList& drawList) const;
 
     Camera m_camera;
@@ -48,6 +66,8 @@ private:
 // Display names (Spanish UI) for simulation enums.
 [[nodiscard]] const char* displayName(BodyKind kind);
 [[nodiscard]] const char* displayName(FlightMode mode);
+[[nodiscard]] const char* displayName(DrivePhase phase);
+[[nodiscard]] const char* displayName(ContactLevel level);
 [[nodiscard]] std::string formatDistance(f64 meters);
 [[nodiscard]] std::string formatSpeed(f64 metersPerSecond);
 

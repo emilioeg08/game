@@ -142,3 +142,28 @@ Antes de optimizar (ADR-020): 8,1 µs/paso con 12 cargueros y 67 µs/paso con 20
 **Lectura:** con los botones ×1 a ×100K el sandbox va a la velocidad pedida; con ×1M la UI indica
 "limitado por CPU" (~×236.000 real). El siguiente salto no vendrá de más hilos (hay poco trabajo por paso)
 sino de dar menos pasos: LOD de vuelo con tramos analíticos durante el crucero.
+
+### Tras el reescalado a tiempo real (ADR-021/022)
+
+`gx_bench --filter sim.sandbox --quick`, Release, 1 hora simulada con vuelo cada 200 ms (18.000 pasos):
+
+| Cargueros | Hilos | µs/paso | Margen sobre el tiempo real |
+|---|---|---|---|
+| 12 | 12 | 5,1 | ~×38.900 |
+| 200 | 12 | 17,9 | ~×11.200 |
+| 2.000 | 1 | 156,1 | ~×1.280 |
+| 2.000 | 12 | 124,4 | ~×1.600 |
+
+Con ×10 como máximo, incluso 2.000 naves en un sistema usan menos del 1 % de un núcleo.
+
+### M2.2 — con sensores (escaneo cada 1 s)
+
+| Cargueros | µs/paso (12 hilos) | Margen sobre el tiempo real |
+|---|---|---|
+| 12 | 5,6 | ~×35.600 |
+| 200 | 21,9 | ~×9.100 |
+| 2.000 | 176,5 | ~×1.130 |
+
+La primera versión del escaneo buscaba a los observadores recorriendo todas las naves y los contactos de
+forma lineal: con 2.000 cargueros costaba 2,8 ms por escaneo (690 µs/paso de media). Con listas de
+observadores por facción y un índice de contactos por objetivo baja a 176 µs/paso.

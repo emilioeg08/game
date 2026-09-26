@@ -65,6 +65,7 @@ Reglas:
 | `Space/Orbits` | órbitas keplerianas analíticas (solver de Kepler con Newton protegido) |
 | `Space/Bodies` | `CelestialBody`, `OrbitsParent`, estado absoluto por la cadena de padres |
 | `Space/Ships` | componentes de nave, autopiloto (`steer`), `FlightSystem` (dos pases, eventos `ShipArrived`) |
+| `Space/Sensors` | firmas, detección pasiva y activa, transpondedor, imagen de sensores por facción (`SensorSystem`) |
 | `Space/Generation` | generación procedural del sistema estelar (datos puros) y creación de entidades |
 | `Game/Sandbox` | escenario jugable: jugador, cargueros NPC, `PilotCommand`, diario, LOD de vuelo |
 | `Game/Presentation` | `SystemSnapshot`: foto de solo lectura para el cliente |
@@ -290,9 +291,9 @@ solo como referencia conceptual: la interfaz, los nombres y los assets serán or
 8. **Carga sintética poco representativa.** La IA, los sensores y la política reales tendrán otros
    patrones de coste.
 9. **Solo verificado en Windows/MSVC.**
-10. **Techo de aceleración del tiempo del sandbox.** Con pasos de vuelo de 1 s: ~×236.000 con 13 naves y
-    ~×60.000 con 200 (`sim.sandbox`). Para simular meses por segundo con cientos de naves hará falta un LOD
-    de vuelo más grueso durante el crucero (tramos analíticos).
+10. **Escala en tiempo real (ADR-021).** Con ×10 como máximo, el cliente va sobrado de CPU, pero la
+    economía, la política y la sucesión deberán diseñarse para avanzar a ritmo real. El universo lejano
+    (otros sistemas) tendrá que simularse de forma agregada (LOD 0–1) para no pagar su coste en tiempo real.
 11. **Dependencias descargadas al configurar.** SDL3 e ImGui se descargan de GitHub (versiones y SHA-256
     fijados) la primera vez que se configura cada preset. Sin red, usar `-DGX_BUILD_CLIENT=OFF`.
 12. **Diseño provisional.** Todo el diseño de juego es mío hasta que exista `game.md` (DESIGN.md).

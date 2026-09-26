@@ -8,9 +8,9 @@
 
 ## Estado: slice M2.1 "Sistema estelar jugable"
 
-Se puede: empezar una partida en un sistema generado, pilotar la nave (autopiloto o empuje manual), ver a
-los cargueros NPC viajar solos entre puertos, acelerar el tiempo, guardar y cargar, e inspeccionar
-cualquier entidad. **Todavía no hay:** sensores ni niebla de guerra, combate, daño, economía jugable,
+Se puede: empezar una partida en un sistema generado, pilotar la nave (autopiloto con salto al
+hiperespacio, o empuje manual), ver a los cargueros NPC viajar solos entre puertos, jugar en tiempo real
+con aceleración ×3 o ×10, guardar y cargar, e inspeccionar cualquier entidad, con **sensores y niebla de guerra** (M2.2). **Todavía no hay:** combate, daño, economía jugable,
 facciones políticas ni más de un sistema estelar (slices M2.2 en adelante).
 
 ## Escala, unidades y tiempo
@@ -21,7 +21,8 @@ facciones políticas ni más de un sistema estelar (slices M2.2 en adelante).
 | Marco de referencia | inercial centrado en la estrella; plano de la eclíptica = mapa | zoom continuo como en las referencias |
 | Año de época | 2400 (`kEpochYear`) | futuro lejano; original |
 | Calendario | 12 meses gregorianos, años de 365 días | fechas legibles ("2400-03-01"), determinismo trivial |
-| Velocidades del tiempo | pausa, ×1, ×10, ×100, ×1K, ×10K, ×100K, ×1M | de pilotar a ver pasar meses; la UI muestra la velocidad real conseguida |
+| Velocidades del tiempo | pausa, **×1 = tiempo real**, ×3, ×10 | directiva del usuario (ADR-021): se juega en tiempo real, como un simulador espacial; los viajes duran minutos |
+| Consecuencia | el calendario avanza a ritmo real (×10 como máximo) | la escala de la economía, la política y las generaciones se diseñará para esta velocidad en M3–M5 |
 
 ## Sistema estelar (generación procedural)
 
@@ -38,10 +39,18 @@ facciones políticas ni más de un sistema estelar (slices M2.2 en adelante).
   Nunca se usan catálogos reales ni nombres de otros juegos.
 - **Órbitas**: raíles keplerianos analíticos. Los cuerpos no se integran y no derivan.
 
-## Modelo de vuelo
+## Modelo de vuelo (ADR-022)
 
-- **Newtoniano con impulsor de ciencia ficción**: la nave tiene inercia y un empuje máximo alto; si no hay
-  empuje, sigue derivando. **Sin gravedad sobre las naves** en este slice (sí sobre los cuerpos, vía
+- **Dos motores**, como en las referencias: **sublumínico** para maniobrar y atracar (newtoniano), e
+  **hiperespacio** para cruzar el sistema (millones de km/s, trayecto recto).
+- **Pozos gravitatorios**: estrella = 20 radios y planetas = 25 radios (círculos discontinuos en el mapa).
+  Dentro no se puede saltar, y el salto termina en el borde del pozo del destino con la velocidad igualada
+  a la suya.
+- **El autopiloto decide solo**: si el tramo en hiperespacio supera 1 millón de km y la nave está fuera de
+  un pozo, carga el salto (5–12 s, sin dejar de avanzar), salta, sale junto al destino y termina en
+  sublumínico. Cualquier otra orden cancela la carga o provoca una salida de emergencia.
+- **Newtoniano con impulsor de ciencia ficción** (sublumínico): la nave tiene inercia y un empuje máximo
+  alto; si no hay empuje, sigue derivando. **Sin gravedad sobre las naves** en este slice (sí sobre los cuerpos, vía
   órbitas): con aceleraciones de cientos de g la gravedad planetaria es despreciable en viaje, y aplicarla
   complicaría el pilotaje sin aportar juego todavía. Se reconsiderará con combate orbital.
 - **Velocidad de crucero**: límite del autopiloto, no físico. Con empuje manual se puede superar.
@@ -52,20 +61,41 @@ facciones políticas ni más de un sistema estelar (slices M2.2 en adelante).
   estrella a 3 radios.
 - **Mantener posición** junto a un cuerpo que orbita exige empujar de forma continua (se ve la llama): es
   el precio de no tener gravedad sobre las naves.
-- **LOD del vuelo**: pasos de 1 s (estratégico) mientras nadie pilota a mano, y de 100 ms (táctico) mientras
-  el jugador usa el empuje manual. El cambio se hace dentro de la simulación, por comando, y es
+- **LOD del vuelo**: pasos de 200 ms (estratégico) mientras nadie pilota a mano, y de 50 ms (táctico)
+  mientras el jugador usa el empuje manual. El cambio se hace dentro de la simulación, por comando, y es
   determinista.
 
 ### Clases de nave
 
-| Clase | Rol | Empuje máximo | Crucero | 1 UA a crucero |
-|---|---|---|---|---|
-| Correo | nave del jugador | 3.000 m/s² (~306 g) | 4.000 km/s | ~10 h |
-| Carguero | transporte NPC | 600 m/s² (~61 g) | 1.500 km/s | ~28 h |
+| Clase | Rol | Sublumínico: empuje / crucero | Hiperespacio | Carga del salto | 1 UA en hiperespacio |
+|---|---|---|---|---|---|
+| Correo | nave del jugador | 50 km/s² / 15.000 km/s | 1.500.000 km/s (5 c) | 5 s | ~100 s |
+| Carguero | transporte NPC | 15 km/s² / 6.000 km/s | 600.000 km/s (2 c) | 12 s | ~250 s |
 
-Las referencias muestran velocidades de miles de km/s y aceleraciones enormes, así que se optó por la misma
-escala de juego: los viajes dentro de un sistema duran horas o días de tiempo simulado, es decir, segundos o
-minutos con el tiempo acelerado.
+Las referencias muestran velocidades sublumínicas de ~20.000 km/s y velocidades de hiperespacio de más de
+un millón de km/s. Con ×1 = tiempo real, un viaje entre planetas dura de 3 a 6 minutos a ×1 (menos de un
+minuto a ×10).
+
+## Sensores (ADR-023)
+
+- **Nadie es omnisciente**: solo ves tu flota y lo que detectan tus sensores. Los cuerpos celestes sí se
+  conocen (cartas del sistema).
+- **Pasivo** (siempre activo): detecta según la emisión del otro. Una nave quieta es casi invisible (a unos
+  22.000 km para los sensores de un carguero), una que acelera fuerte se ve a unos 700.000 km, y cualquier
+  salto al hiperespacio se ve desde casi todo el sistema.
+- **Radar (R)**: identifica un carguero a unos 3,5 millones de km con buena precisión, pero su emisión te
+  hace visible a unos 7 millones de km.
+- **Transpondedor (T)**: difunde tu identidad y posición hasta 1 UA. Los cargueros lo llevan encendido. Si
+  lo apagas, cuesta mucho más identificarte (más adelante tendrá consecuencias legales).
+- **Contactos**: desconocido (?), clasificado ("Carguero?") o identificado (nombre), con círculo de
+  incertidumbre. Si dejan de detectarse se atenúan y se pierden a los 20 s. El ruido crea a veces contactos
+  fantasma que desaparecen.
+- **Ir a un contacto** lleva a su posición estimada, no a la real.
+
+| Clase | Emisión base | Emisión a pleno empuje | Sección radar | Sensibilidad pasiva | Radar |
+|---|---|---|---|---|---|
+| Correo | 1e3 | +1e6 | 1e3 m² | 1e12 | sí |
+| Carguero | 5e3 | +2e6 | 1e4 m² | 5e11 | no |
 
 ## Facciones y personajes (mínimo)
 
@@ -75,8 +105,8 @@ minutos con el tiempo acelerado.
 
 ## Comportamiento de los NPC (cargueros)
 
-- Regla simple y reproducible, sin LLM (prompt §16): esperar en puerto de 2 a 12 h, elegir **otro** puerto al
-  azar (flujo aleatorio por nave y viaje), volar, atracar y repetir.
+- Regla simple y reproducible, sin LLM (prompt §16): esperar en puerto de 30 s a 3 min, elegir **otro** puerto
+  al azar (flujo aleatorio por nave y viaje), volar (con salto) y atracar, y repetir.
 - La galaxia actúa sin el jugador: los cargueros viajan y atracan aunque el jugador no haga nada, y cada
   llegada queda en el diario.
 - Próximo paso (M3, economía): los destinos dependerán de oferta, demanda y precios (utility AI) y la carga
@@ -92,7 +122,8 @@ minutos con el tiempo acelerado.
 | Ir a un objeto o a un punto | clic derecho |
 | Empuje manual | W A S D (arriba = +y del mapa) |
 | Frenar | X |
-| Pausa / velocidad | Espacio / 1–7 |
+| Radar / transpondedor | R / T |
+| Pausa / velocidad | Espacio / 1 (×1), 2 (×3), 3 (×10) |
 | Seguir tu nave / la selección | H / F |
 | Guardar / cargar | F5 / F9 |
 | Depuración / ayuda | F3 / F1 |
@@ -107,7 +138,7 @@ minutos con el tiempo acelerado.
 
 ## Pendiente de decidir (para `game.md` o para próximos slices)
 
-1. Sensores: alcance, firmas, ruido, transpondedor (M2.2).
+1. Consecuencias de apagar el transpondedor (ley, reputación) y guerra electrónica.
 2. Armas, defensa puntual, misiles y daño por módulos (M2.3–M2.4, según las referencias del editor de nave).
 3. Bienes, producción y precios de los puertos (M3).
 4. Hiperespacio o viaje entre sistemas y la estructura de la galaxia.

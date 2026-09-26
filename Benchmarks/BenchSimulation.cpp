@@ -177,11 +177,11 @@ void benchGrain(Report& report, const Options& options) {
 }
 
 void benchSandbox(Report& report, const Options& options) {
-    section("sim.sandbox (playable slice: 1 system, player + haulers, strategic flight at 1 s)");
-    const u32 days = options.quick ? 2 : 5;
-    std::printf("%8s %8s %10s %10s %12s %12s %12s\n", "haulers", "threads", "steps", "wall ms", "us/step",
-                "sim-days/s", "max speed x");
-    for (const u32 haulers : {12u, 200u}) {
+    section("sim.sandbox (playable slice at real-time scale: player + haulers, flight every 200 ms)");
+    const u32 hours = options.quick ? 1 : 3;
+    std::printf("%8s %8s %10s %10s %10s %16s\n", "haulers", "threads", "steps", "wall ms", "us/step",
+                "x real time max");
+    for (const u32 haulers : {12u, 200u, 2000u}) {
         for (const u32 threads : {1u, options.threads}) {
             SandboxConfig config;
             config.haulers = haulers;
@@ -190,25 +190,24 @@ void benchSandbox(Report& report, const Options& options) {
             Simulation simulation(Simulation::Config{.seed = config.seed}, jobs);
             sandbox.install(simulation);
             sandbox.populate(simulation);
-            simulation.runFor(SimDuration::hours(1)); // warm-up
+            simulation.runFor(SimDuration::minutes(5)); // warm-up: haulers leave port
             profiling::resetStats();
             const u64 stepsBefore = simulation.stepCount();
             const Stopwatch timer;
-            simulation.runFor(SimDuration::days(days));
+            simulation.runFor(SimDuration::hours(hours));
             const f64 wallMs = timer.elapsedMs();
             const u64 steps = simulation.stepCount() - stepsBefore;
             const f64 usPerStep = wallMs * 1000.0 / static_cast<f64>(steps);
-            const f64 daysPerSecond = static_cast<f64>(days) / (wallMs / 1000.0);
-            std::printf("%8u %8u %10llu %10.1f %12.2f %12.2f %12.0f\n", haulers, threads,
-                        static_cast<unsigned long long>(steps), wallMs, usPerStep, daysPerSecond,
-                        daysPerSecond * 86'400.0);
+            const f64 realTimeFactor = static_cast<f64>(hours) * 3'600'000.0 / wallMs;
+            std::printf("%8u %8u %10llu %10.1f %10.2f %16.0f\n", haulers, threads,
+                        static_cast<unsigned long long>(steps), wallMs, usPerStep, realTimeFactor);
             std::fflush(stdout);
             report.add("sim.sandbox", {{"haulers", Report::integer(haulers)},
                                        {"threads", Report::integer(threads)},
                                        {"steps", Report::integer(steps)},
                                        {"wall_ms", Report::number(wallMs)},
                                        {"us_per_step", Report::number(usPerStep)},
-                                       {"sim_days_per_second", Report::number(daysPerSecond)}});
+                                       {"real_time_factor", Report::number(realTimeFactor)}});
         }
     }
     const std::vector<profiling::ZoneSummary> zones = profiling::summary();

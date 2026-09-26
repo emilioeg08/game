@@ -40,10 +40,15 @@ Sandbox::Sandbox(const SandboxConfig& config) : m_config(config) {}
 void Sandbox::install(Simulation& simulation) {
     m_simulation = &simulation;
     registerSpaceTypes(simulation);
+    SensorSystem::registerTypes(simulation);
     simulation.world().registerComponent<HaulerBrain>("Game.HaulerBrain");
 
     simulation.events().channel<ShipArrived>().subscribe(
         [this](const ShipArrived& event, const TickContext& context) { onShipArrived(event, context); });
+    simulation.events().channel<HyperspaceTransition>().subscribe(
+        [this](const HyperspaceTransition& event, const TickContext& context) {
+            onHyperspaceTransition(event, context);
+        });
     simulation.commands().registerCommand<PilotCommand>(
         "Game.Pilot", [this](const PilotCommand& command, const TickContext& context) {
             onPilotCommand(command, context);
@@ -56,6 +61,11 @@ void Sandbox::install(Simulation& simulation) {
                           {},
                           [this](const TickContext& context) { updateHaulers(context); }});
     m_flightSystem = m_flight.install(simulation, m_config.strategicFlightPeriod);
+    m_sensors.install(simulation, m_config.sensorScanPeriod); // after flight: scans see this step's motion
+    simulation.commands().registerCommand<SensorCommand>(
+        "Game.Sensors", [this](const SensorCommand& command, const TickContext& context) {
+            onSensorCommand(command, context);
+        });
 
     simulation.addStateBlock(
         "Game.Sandbox", [this](BinaryWriter& writer) { writeState(writer); },
@@ -96,7 +106,8 @@ void Sandbox::populate(Simulation& simulation) {
         const content::ShipClassDef& shipDef = content::kShipClasses[shipClass];
         const EntityId ship = world.createEntity();
         world.components<Kinematics>().add(ship, {portState.position + offset, portState.velocity, {}});
-        world.components<ShipDrive>().add(ship, {shipDef.maxAcceleration, shipDef.cruiseSpeed});
+        world.components<ShipDrive>().add(ship, {shipDef.maxAcceleration, shipDef.cruiseSpeed,
+                                                 shipDef.hyperspaceSpeed, shipDef.hyperspaceChargeTime});
         ShipControl control;
         control.mode = FlightMode::Approach; // keeping station at the port
         control.target = port;
@@ -104,6 +115,11 @@ void Sandbox::populate(Simulation& simulation) {
         control.arrived = true;
         world.components<ShipControl>().add(ship, control);
         world.components<ShipIdentity>().add(ship, {std::move(name), faction, shipClass});
+        const content::SensorDef& sensorDef = content::kShipSensors[shipClass];
+        world.components<SensorSuite>().add(
+            ship, {sensorDef.passiveSensitivity, sensorDef.activeStrength, false, true});
+        world.components<SignatureProfile>().add(
+            ship, {sensorDef.baseEmission, sensorDef.driveEmission, sensorDef.crossSection});
         return ship;
     };
 
@@ -114,8 +130,9 @@ void Sandbox::populate(Simulation& simulation) {
                                        10 + rng.uniformU32(90));
         const EntityId ship =
             spawnShip(std::move(name), content::kFactionIndependent, content::kShipClassHauler, port);
-        world.components<HaulerBrain>().add(ship,
-                                            {now + SimDuration::minutes(rng.uniformU32(8 * 60)), port, 0});
+        const auto maxDwellMs = static_cast<u32>(m_config.maxDwell.count() / 1000);
+        world.components<HaulerBrain>().add(
+            ship, {now + SimDuration::milliseconds(rng.uniformU32(maxDwellMs)), port, 0});
     }
     addJournal(now, std::format("Comienza la partida en el sistema {}.", m_systemName));
 }
@@ -165,7 +182,9 @@ void Sandbox::onShipArrived(const ShipArrived& event, const TickContext& context
         brain->lastPort = event.target;
         Rng rng =
             Rng::forStream(context.worldSeed, hashCombine(kDwellStream, entityKey(event.ship)), brain->trips);
-        brain->departAt = context.now + SimDuration::minutes(120 + rng.uniformU32(10 * 60)); // 2-12 h in port
+        const auto dwellSpanMs = static_cast<u32>((m_config.maxDwell - m_config.minDwell).count() / 1000);
+        brain->departAt =
+            context.now + m_config.minDwell + SimDuration::milliseconds(rng.uniformU32(dwellSpanMs + 1));
         addJournal(context.now,
                    std::format("{} atraca en {}.", nameOf(world, event.ship), nameOf(world, event.target)));
     } else if (event.ship == m_player) {
@@ -173,6 +192,21 @@ void Sandbox::onShipArrived(const ShipArrived& event, const TickContext& context
                                     ? std::format("{} ha llegado a {}.", nameOf(world, event.ship),
                                                   nameOf(world, event.target))
                                     : std::format("{} ha llegado a su destino.", nameOf(world, event.ship)));
+    }
+}
+
+void Sandbox::onHyperspaceTransition(const HyperspaceTransition& event, const TickContext& context) {
+    if (event.ship != m_player) {
+        return;
+    }
+    const ShipControl* control = context.world.components<ShipControl>().tryGet(event.ship);
+    if (event.entering) {
+        addJournal(context.now, "Salto al hiperespacio.");
+    } else if (control != nullptr && control->mode == FlightMode::Approach) {
+        addJournal(context.now, std::format("Salida del hiperespacio cerca de {}.",
+                                            nameOf(context.world, control->target)));
+    } else {
+        addJournal(context.now, "Salida del hiperespacio.");
     }
 }
 
@@ -234,6 +268,30 @@ void Sandbox::onPilotCommand(const PilotCommand& command, const TickContext& con
         addJournal(context.now, "Deteniendo la nave.");
     }
     updateFlightRate(world);
+}
+
+void Sandbox::onSensorCommand(const SensorCommand& command, const TickContext& context) {
+    World& world = context.world;
+    const ShipIdentity* identity =
+        world.isAlive(command.ship) ? world.components<ShipIdentity>().tryGet(command.ship) : nullptr;
+    SensorSuite* suite = world.components<SensorSuite>().tryGet(command.ship);
+    if (identity == nullptr || identity->faction != content::kFactionPlayer || suite == nullptr) {
+        ++m_stats.commandsRejected;
+        GX_LOG_WARN("Sandbox", "sensor command rejected: not a ship of the player");
+        return;
+    }
+    const bool radarAvailable = suite->activeStrength > 0.0;
+    if (command.activeOn != suite->activeOn && (radarAvailable || !command.activeOn)) {
+        suite->activeOn = command.activeOn;
+        addJournal(context.now, suite->activeOn ? "Radar activado: ves más, pero todos te ven a ti."
+                                                : "Radar desactivado.");
+    }
+    if (command.transponderOn != suite->transponderOn) {
+        suite->transponderOn = command.transponderOn;
+        addJournal(context.now, suite->transponderOn
+                                    ? "Transpondedor encendido."
+                                    : "Transpondedor apagado: tu identidad ya no se difunde.");
+    }
 }
 
 void Sandbox::updateFlightRate(const World& world) {

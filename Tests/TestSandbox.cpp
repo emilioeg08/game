@@ -76,7 +76,7 @@ GX_TEST(Sandbox, NewGameHasPlayerHaulersAndPorts) {
 GX_TEST(Sandbox, HaulersTravelWithoutThePlayer) {
     Session session(3);
     session.sandbox.populate(session.simulation);
-    session.simulation.runFor(SimDuration::days(2));
+    session.simulation.runFor(SimDuration::minutes(30));
     GX_EXPECT(session.sandbox.stats().haulerDepartures >= session.sandbox.config().haulers);
     GX_EXPECT(session.sandbox.stats().arrivals > 0);
     GX_EXPECT(session.journalContains("atraca en"));
@@ -91,8 +91,8 @@ GX_TEST(Sandbox, PlayerFliesToAPortByCommand) {
     GX_EXPECT(session.playerControl().target == destination);
     GX_EXPECT(!session.playerControl().arrived);
 
-    for (int day = 0; day < 3 && !session.playerControl().arrived; ++day) {
-        session.simulation.runFor(SimDuration::days(1));
+    for (int slice = 0; slice < 12 && !session.playerControl().arrived; ++slice) {
+        session.simulation.runFor(SimDuration::minutes(5)); // real-time scale: minutes per trip
     }
     GX_EXPECT(session.playerControl().arrived);
     GX_EXPECT(session.journalContains("ha llegado a"));
@@ -138,11 +138,11 @@ GX_TEST(Sandbox, SessionIsDeterministicAcrossThreadCounts) {
         Session session(workers);
         session.sandbox.populate(session.simulation);
         const EntityId destination = session.destinationPort();
-        session.simulation.runFor(SimDuration::hours(3));
+        session.simulation.runFor(SimDuration::minutes(3));
         session.pilot(FlightMode::Manual, {}, {}, Vec3d{1.0, 0.0, 0.0});
-        session.simulation.runFor(SimDuration::minutes(10));
+        session.simulation.runFor(SimDuration::seconds(30));
         session.pilot(FlightMode::Approach, destination);
-        session.simulation.runFor(SimDuration::days(1));
+        session.simulation.runFor(SimDuration::minutes(20));
         return session.simulation.stateHash();
     };
     const u64 reference = play(0);
@@ -153,13 +153,13 @@ GX_TEST(Sandbox, SessionIsDeterministicAcrossThreadCounts) {
 GX_TEST(Sandbox, SaveLoadContinuesIdentically) {
     const auto opening = [](Session& session) {
         session.sandbox.populate(session.simulation);
-        session.simulation.runFor(SimDuration::hours(20));
+        session.simulation.runFor(SimDuration::minutes(10));
         session.pilot(FlightMode::Approach, session.destinationPort()); // in flight when saved
-        session.simulation.runFor(SimDuration::hours(1));
+        session.simulation.runFor(SimDuration::seconds(30));
     };
     Session continuous(3);
     opening(continuous);
-    continuous.simulation.runFor(SimDuration::days(1));
+    continuous.simulation.runFor(SimDuration::minutes(20));
 
     Session saver(3);
     opening(saver);
@@ -171,7 +171,7 @@ GX_TEST(Sandbox, SaveLoadContinuesIdentically) {
     GX_EXPECT(loaded.simulation.saveState() == saved);
     GX_EXPECT_EQ(loaded.sandbox.systemName(), saver.sandbox.systemName());
     GX_EXPECT(loaded.sandbox.ports() == saver.sandbox.ports());
-    loaded.simulation.runFor(SimDuration::days(1));
+    loaded.simulation.runFor(SimDuration::minutes(20));
     GX_EXPECT_EQ(loaded.simulation.stateHash(), continuous.simulation.stateHash());
 }
 
@@ -191,8 +191,12 @@ GX_TEST(Sandbox, SnapshotDescribesTheWorld) {
         GX_EXPECT(body.kind == BodyKind::Star ||
                   (body.orbitPath != nullptr && body.orbitPath->size() == SnapshotBuilder::kOrbitPathPoints));
     }
-    // Ships are extrapolated half a second past their last flight step (1 s period).
+    // Ships are extrapolated from their last flight step to "now".
     const Kinematics& state =
         session.simulation.world().components<Kinematics>().get(session.sandbox.playerShip());
-    GX_EXPECT_NEAR(length(player->position - (state.position + state.velocity * 0.5)), 0.0, 1e-3);
+    const f64 sinceFlight = (session.simulation.now() -
+                             session.simulation.scheduler().system(session.sandbox.flightSystem()).lastRun)
+                                .toSeconds();
+    GX_EXPECT(sinceFlight > 0.0);
+    GX_EXPECT_NEAR(length(player->position - (state.position + state.velocity * sinceFlight)), 0.0, 1e-3);
 }

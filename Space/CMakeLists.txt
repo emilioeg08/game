@@ -6,6 +6,8 @@ add_library(gx_space STATIC
     Generation/StarSystemGenerator.h
     Orbits/Kepler.cpp
     Orbits/Kepler.h
+    Sensors/Sensors.cpp
+    Sensors/Sensors.h
     Ships/Flight.cpp
     Ships/Flight.h
     Ships/Ship.h

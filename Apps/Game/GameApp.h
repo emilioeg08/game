@@ -28,8 +28,9 @@ public:
         f64 prerunHours = 0.0;  // simulate before the first frame
         f64 metersPerPixel = 0.0;
         bool followStar = false;
-        bool select = false; // select the player ship (shows the inspector)
-        i32 flyToPort = -1;  // order the player ship to this port (index in Sandbox::ports())
+        bool select = false;    // select the player ship (shows the inspector)
+        bool showTruth = false; // debug omniscient view
+        i32 flyToPort = -1;     // order the player ship to this port (index in Sandbox::ports())
     };
 
     GameApp();
@@ -60,10 +61,13 @@ private:
     void handleMap(const MapView::Interaction& interaction);
     void submitPilot(FlightMode mode, EntityId target = {}, const Vec3d& point = {},
                      const Vec3d& thrust = {});
+    void submitSensors(bool activeOn, bool transponderOn);
 
     void drawTimeBar();
     void drawShipPanel();
     void drawSelectionPanel();
+    void drawContactSelection(const ContactView& contact);
+    void drawSensorsPanel();
     void drawJournal();
     void drawDebugPanel();
     void drawHelp();
@@ -80,7 +84,7 @@ private:
     SandboxConfig m_config;
     std::unique_ptr<Session> m_session;
     TimeController m_time{SimTime::epoch()};
-    usize m_speedIndex = 2;
+    usize m_speedIndex = 0; // x1: real time
     bool m_paused = false;
 
     SnapshotBuilder m_snapshotBuilder;
@@ -88,6 +92,8 @@ private:
     MapView m_map;
     InspectorView m_inspector;
     EntityId m_selected;
+    u32 m_selectedContact = 0; // sensor track selected on the map (exclusive with m_selected)
+    bool m_showTruth = false;  // debug: omniscient view
 
     Vec3d m_sentThrust; // last manual thrust sent, to only send changes
     bool m_thrusting = false;

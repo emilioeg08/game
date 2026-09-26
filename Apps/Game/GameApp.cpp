@@ -23,8 +23,9 @@ namespace gx {
 namespace {
 
 constexpr std::string_view kChannel = "Game";
-constexpr std::array<u32, 7> kSpeeds = {1, 10, 100, 1'000, 10'000, 100'000, 1'000'000};
-constexpr std::array<const char*, 7> kSpeedLabels = {"x1", "x10", "x100", "x1K", "x10K", "x100K", "x1M"};
+// x1 is real time (ADR-021): the game is played in real time with modest acceleration.
+constexpr std::array<u32, 3> kSpeeds = {1, 3, 10};
+constexpr std::array<const char*, 3> kSpeedLabels = {"x1", "x3", "x10"};
 constexpr u64 kSimulationBudgetNs = 8'000'000; // per frame: keeps the client responsive at any speed
 constexpr u64 kStatusDurationNs = 4'000'000'000;
 constexpr const char* kSaveDirectory = "saves";
@@ -151,6 +152,7 @@ int GameApp::run(const Options& options) {
     if (options.select) {
         m_selected = sandbox().playerShip();
     }
+    m_showTruth = options.showTruth;
 
     u32 frame = 0;
     u64 lastNs = platform::monotonicNanoseconds();
@@ -195,11 +197,13 @@ int GameApp::run(const Options& options) {
         handleKeyboard();
         advanceSimulation(realDeltaNs);
         m_snapshotBuilder.build(simulation(), sandbox(), m_snapshot);
-        handleMap(m_map.update(m_snapshot, m_selected));
+        handleMap(
+            m_map.update(m_snapshot, MapSelection{m_selected, m_selectedContact}, MapOptions{m_showTruth}));
 
         drawTimeBar();
         drawShipPanel();
         drawSelectionPanel();
+        drawSensorsPanel();
         drawJournal();
         if (m_showDebug) {
             drawDebugPanel();
@@ -249,6 +253,7 @@ void GameApp::newGame() {
     sandbox().populate(simulation());
     m_snapshotBuilder = SnapshotBuilder{};
     m_selected = {};
+    m_selectedContact = 0;
     m_sentThrust = {};
     m_thrusting = false;
     m_map.camera().follow = sandbox().playerShip();
@@ -288,6 +293,7 @@ void GameApp::quickLoad() {
     m_session = std::move(loaded);
     m_snapshotBuilder = SnapshotBuilder{};
     m_selected = {};
+    m_selectedContact = 0;
     m_sentThrust = {};
     m_thrusting = false;
     m_map.camera().follow = sandbox().playerShip();
@@ -327,6 +333,10 @@ void GameApp::submitPilot(FlightMode mode, EntityId target, const Vec3d& point, 
     simulation().submitCommand(PilotCommand{sandbox().playerShip(), mode, target, point, thrust});
 }
 
+void GameApp::submitSensors(bool activeOn, bool transponderOn) {
+    simulation().submitCommand(SensorCommand{sandbox().playerShip(), activeOn, transponderOn});
+}
+
 void GameApp::handleKeyboard() {
     const ImGuiIO& io = ImGui::GetIO();
     if (io.WantCaptureKeyboard) {
@@ -355,6 +365,13 @@ void GameApp::handleKeyboard() {
     }
     if (ImGui::IsKeyPressed(ImGuiKey_Escape, false)) {
         m_selected = {};
+        m_selectedContact = 0;
+    }
+    if (ImGui::IsKeyPressed(ImGuiKey_R, false)) {
+        submitSensors(!m_snapshot.playerSensors.activeOn, m_snapshot.playerSensors.transponderOn);
+    }
+    if (ImGui::IsKeyPressed(ImGuiKey_T, false)) {
+        submitSensors(m_snapshot.playerSensors.activeOn, !m_snapshot.playerSensors.transponderOn);
     }
     if (ImGui::IsKeyPressed(ImGuiKey_H, false)) {
         m_map.camera().follow = sandbox().playerShip();
@@ -387,12 +404,16 @@ void GameApp::handleKeyboard() {
 
 void GameApp::handleMap(const MapView::Interaction& interaction) {
     if (interaction.leftClicked) {
-        m_selected = interaction.leftClickedEntity;
+        m_selected = interaction.leftClickedTarget.entity;
+        m_selectedContact = interaction.leftClickedTarget.contact;
     }
     if (interaction.rightClicked) {
-        if (interaction.rightClickedEntity.isValid() &&
-            interaction.rightClickedEntity != sandbox().playerShip()) {
-            submitPilot(FlightMode::Approach, interaction.rightClickedEntity);
+        const MapSelection& target = interaction.rightClickedTarget;
+        if (target.entity.isValid() && target.entity != sandbox().playerShip()) {
+            submitPilot(FlightMode::Approach, target.entity);
+        } else if (const ContactView* contact = m_snapshot.findContact(target.contact)) {
+            // A contact is only an estimate: fly to where the sensors place it, not to the real ship.
+            submitPilot(FlightMode::MoveTo, {}, contact->position);
         } else {
             submitPilot(FlightMode::MoveTo, {}, interaction.rightClickedPoint);
         }
@@ -475,6 +496,12 @@ void GameApp::drawShipPanel() {
     ImGui::Text("Velocidad:    %s", formatSpeed(length(ship->velocity)).c_str());
     ImGui::Text("Aceleración:  %.0f m/s² (%.0f g)", acceleration, acceleration / kStandardGravity);
     ImGui::Text("Modo:         %s", displayName(ship->mode));
+    if (ship->phase == DrivePhase::Charging) {
+        ImGui::TextColored(color(200, 160, 255), "Motor:        cargando salto (%.1f s)",
+                           ship->chargeRemaining);
+    } else {
+        ImGui::Text("Motor:        %s", displayName(ship->phase));
+    }
     if (ship->mode == FlightMode::Approach || ship->mode == FlightMode::MoveTo) {
         const std::string target =
             ship->mode == FlightMode::Approach ? nameOf(ship->target) : "punto del espacio";
@@ -514,7 +541,50 @@ void GameApp::drawShipPanel() {
     ImGui::End();
 }
 
+void GameApp::drawContactSelection(const ContactView& contact) {
+    if (contact.level == ContactLevel::Identified && !contact.name.empty()) {
+        ImGui::Text("%.*s", static_cast<int>(contact.name.size()), contact.name.data());
+    } else if (contact.level == ContactLevel::Classified) {
+        ImGui::Text("Contacto %u: %s?", contact.trackId, content::kShipClasses[contact.shipClass].name);
+    } else {
+        ImGui::Text("Contacto desconocido %u", contact.trackId);
+    }
+    ImGui::TextDisabled("Sensores: %s", displayName(contact.level));
+    if (contact.level == ContactLevel::Identified) {
+        ImGui::TextDisabled("Facción: %s  ·  %s", content::kFactionNames[contact.faction],
+                            content::kShipClasses[contact.shipClass].name);
+    }
+    Vec3d playerPosition;
+    if (m_snapshot.positionOf(sandbox().playerShip(), playerPosition)) {
+        ImGui::Text("Distancia estimada: %s",
+                    formatDistance(length(contact.position - playerPosition)).c_str());
+    }
+    ImGui::Text("Incertidumbre: ±%s", formatDistance(contact.uncertainty).c_str());
+    ImGui::Text("Velocidad estimada: %s", formatSpeed(length(contact.velocity)).c_str());
+    ImGui::Text("Última detección: hace %.0f s", contact.ageSeconds);
+    if (ImGui::Button("Ir a su posición estimada")) {
+        submitPilot(FlightMode::MoveTo, {}, contact.position);
+    }
+    if (m_showTruth && contact.ghost) {
+        ImGui::TextColored(color(255, 90, 200), "[depuración] contacto fantasma: no existe");
+    }
+}
+
 void GameApp::drawSelectionPanel() {
+    if (m_selectedContact != 0) {
+        const ContactView* contact = m_snapshot.findContact(m_selectedContact);
+        if (contact == nullptr) {
+            m_selectedContact = 0; // contact lost
+            return;
+        }
+        const ImVec2 display = ImGui::GetIO().DisplaySize;
+        ImGui::SetNextWindowPos({display.x - 370.0f, 90.0f}, ImGuiCond_FirstUseEver);
+        ImGui::SetNextWindowSize({360.0f, display.y * 0.6f}, ImGuiCond_FirstUseEver);
+        ImGui::Begin("Selección");
+        drawContactSelection(*contact);
+        ImGui::End();
+        return;
+    }
     if (!m_selected.isValid()) {
         return;
     }
@@ -557,6 +627,78 @@ void GameApp::drawSelectionPanel() {
     ImGui::End();
 }
 
+void GameApp::drawSensorsPanel() {
+    const ImVec2 display = ImGui::GetIO().DisplaySize;
+    ImGui::SetNextWindowPos({display.x - 370.0f, display.y * 0.6f + 100.0f}, ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize({360.0f, display.y * 0.4f - 140.0f}, ImGuiCond_FirstUseEver);
+    ImGui::Begin("Sensores");
+    const SensorSuite& sensors = m_snapshot.playerSensors;
+    const bool radarAvailable = sensors.activeStrength > 0.0;
+    if (radarAvailable && ImGui::Button(sensors.activeOn ? "Apagar radar (R)" : "Encender radar (R)")) {
+        submitSensors(!sensors.activeOn, sensors.transponderOn);
+    }
+    ImGui::SameLine();
+    if (ImGui::Button(sensors.transponderOn ? "Apagar transpondedor (T)" : "Encender transpondedor (T)")) {
+        submitSensors(sensors.activeOn, !sensors.transponderOn);
+    }
+    // How visible the player is, against the passive sensors of a typical hauler.
+    const f64 haulerSensitivity = content::kShipSensors[content::kShipClassHauler].passiveSensitivity;
+    ImGui::Text("Tu firma: %.2g", m_snapshot.playerEmission);
+    ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyle().Colors[ImGuiCol_TextDisabled]);
+    ImGui::TextWrapped(
+        "Un carguero te detecta a %s%s",
+        formatDistance(passiveDetectionRange(m_snapshot.playerEmission, haulerSensitivity)).c_str(),
+        sensors.transponderOn ? " (y te identifica a 1 UA por el transpondedor)" : "");
+    ImGui::PopStyleColor();
+    ImGui::Separator();
+
+    Vec3d playerPosition;
+    if (!m_snapshot.positionOf(sandbox().playerShip(), playerPosition)) {
+        ImGui::TextDisabled("Sin nave, no hay sensores.");
+        ImGui::End();
+        return;
+    }
+    std::vector<const ContactView*> contacts;
+    for (const ContactView& contact : m_snapshot.contacts) {
+        contacts.push_back(&contact);
+    }
+    std::sort(contacts.begin(), contacts.end(), [&](const ContactView* a, const ContactView* b) {
+        return lengthSquared(a->position - playerPosition) < lengthSquared(b->position - playerPosition);
+    });
+    ImGui::TextDisabled("%zu contactos (clic para seleccionar)", contacts.size());
+    if (ImGui::BeginTable("contacts", 4, ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingStretchProp)) {
+        ImGui::TableSetupColumn("Contacto");
+        ImGui::TableSetupColumn("Nivel");
+        ImGui::TableSetupColumn("Distancia");
+        ImGui::TableSetupColumn("Hace");
+        ImGui::TableHeadersRow();
+        for (const ContactView* contact : contacts) {
+            ImGui::TableNextRow();
+            ImGui::TableNextColumn();
+            std::string label =
+                contact->level == ContactLevel::Identified && !contact->name.empty()
+                    ? std::string(contact->name)
+                    : (contact->level == ContactLevel::Classified
+                           ? std::format("{}?", content::kShipClasses[contact->shipClass].name)
+                           : std::format("?{}", contact->trackId));
+            label += std::format("###contact{}", contact->trackId);
+            if (ImGui::Selectable(label.c_str(), m_selectedContact == contact->trackId,
+                                  ImGuiSelectableFlags_SpanAllColumns)) {
+                m_selectedContact = contact->trackId;
+                m_selected = {};
+            }
+            ImGui::TableNextColumn();
+            ImGui::TextUnformatted(displayName(contact->level));
+            ImGui::TableNextColumn();
+            ImGui::TextUnformatted(formatDistance(length(contact->position - playerPosition)).c_str());
+            ImGui::TableNextColumn();
+            ImGui::Text("%.0f s", contact->ageSeconds);
+        }
+        ImGui::EndTable();
+    }
+    ImGui::End();
+}
+
 void GameApp::drawJournal() {
     const ImVec2 display = ImGui::GetIO().DisplaySize;
     ImGui::SetNextWindowPos({10.0f, display.y * 0.55f + 100.0f}, ImGuiCond_FirstUseEver);
@@ -590,6 +732,7 @@ void GameApp::drawDebugPanel() {
     ImGui::Text("Entidades: %u  ·  semilla %llu  ·  rechazados: %llu", simulation().world().entityCount(),
                 static_cast<unsigned long long>(m_config.seed),
                 static_cast<unsigned long long>(sandbox().stats().commandsRejected));
+    ImGui::Checkbox("Mostrar la verdad (omnisciencia de depuración)", &m_showTruth);
     if (ImGui::Button("Guardar (F5)")) {
         g_pendingAction = PendingAction::Save;
     }
@@ -637,7 +780,10 @@ void GameApp::drawHelp() {
     ImGui::BulletText("Rueda: zoom (de metros a unidades astronómicas)   ·   Arrastrar: mover la vista");
     ImGui::BulletText("Clic: seleccionar   ·   Clic derecho: ir a ese objeto o a ese punto");
     ImGui::BulletText("W A S D: empuje manual (newtoniano: la nave sigue derivando)   ·   X: frenar");
-    ImGui::BulletText("Espacio: pausa   ·   1-7: velocidad del tiempo (x1 ... x1M)");
+    ImGui::BulletText("Espacio: pausa   ·   1 / 2 / 3: velocidad x1 (tiempo real) / x3 / x10");
+    ImGui::BulletText("Viajes largos: salto al hiperespacio fuera de los pozos gravitatorios (círculos)");
+    ImGui::BulletText(
+        "R: radar (ves más, pero te ven de lejos)   ·   T: transpondedor (difunde tu identidad)");
     ImGui::BulletText("H: seguir tu nave   ·   F: seguir la selección   ·   Esc: deseleccionar");
     ImGui::BulletText("F5: guardar   ·   F9: cargar   ·   F3: depuración   ·   F1: esta ayuda");
     ImGui::End();

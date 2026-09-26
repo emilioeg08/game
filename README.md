@@ -3,9 +3,11 @@
 Motor propio en C++20 para un sandbox 4X de simulación galáctica persistente: la galaxia existe, cambia y
 produce consecuencias aunque el jugador no la esté mirando.
 
-**Estado: M2.1 (Sistema estelar jugable).** Hay un primer juego: un sistema estelar generado con órbitas
-keplerianas, tu nave (autopiloto o empuje newtoniano manual), cargueros NPC que viajan solos entre puertos,
-tiempo acelerable, guardado rápido e inspector de entidades. Por debajo están el kernel de M1 (entidades,
+**Estado: M2.1 (Sistema estelar jugable).** Hay un primer juego en tiempo real (×1, ×3, ×10): un sistema
+estelar generado con órbitas keplerianas, tu nave (autopiloto con salto al hiperespacio fuera de los pozos
+gravitatorios, o empuje newtoniano manual), cargueros NPC que viajan solos entre puertos, guardado rápido e
+inspector de entidades. Los sensores pasivos y activos (radar R, transpondedor T) crean niebla de guerra: solo
+ves tu flota y lo que detectas. Por debajo están el kernel de M1 (entidades,
 eventos, comandos, save/load, replay, LOD por frecuencia) y la fase 0. El diseño es provisional
 ([docs/DESIGN.md](docs/DESIGN.md)) hasta que exista `game.md`. El nombre y el namespace (`gx`) también son
 provisionales.
@@ -42,7 +44,7 @@ Presets: `debug` (sin optimizar, con asserts), `release` (optimizado, para bench
 ```
 
 Controles: rueda = zoom · arrastrar = mover · clic = seleccionar · **clic derecho = ir allí** ·
-WASD = empuje manual · X = frenar · Espacio = pausa · 1–7 = velocidad del tiempo · H/F = seguir ·
+WASD = empuje manual · X = frenar · Espacio = pausa · 1/2/3 = ×1 (tiempo real)/×3/×10 · H/F = seguir ·
 F5/F9 = guardar/cargar · F3 = depuración · F1 = ayuda. La primera configuración descarga SDL3 y Dear ImGui
 (versiones fijadas); `-DGX_BUILD_CLIENT=OFF` compila sin el cliente.
 

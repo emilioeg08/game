@@ -207,6 +207,71 @@ GX_TEST(Space, AutopilotKeepsStationWithAnOrbitingBody) {
     }
 }
 
+GX_TEST(Space, HyperspaceJumpsOutsideWellsAndDropsAtTheTargetWell) {
+    JobSystem jobs(0);
+    Simulation simulation({}, jobs);
+    registerSpaceTypes(simulation);
+    FlightSystem flight;
+    flight.install(simulation, SimDuration::milliseconds(200));
+    World& world = simulation.world();
+
+    const EntityId star = world.createEntity();
+    world.components<CelestialBody>().add(star, {"Star", BodyKind::Star, 7e8, kSunGm});
+    const auto addPlanet = [&](const char* name, f64 au, f64 meanAnomaly) {
+        const EntityId planet = world.createEntity();
+        world.components<CelestialBody>().add(planet, {name, BodyKind::OceanPlanet, 6.4e6, 3.986e14});
+        OrbitalElements orbit;
+        orbit.semiMajorAxis = au * kAu;
+        orbit.meanAnomalyAtEpoch = meanAnomaly;
+        world.components<OrbitsParent>().add(planet, {star, orbit});
+        return planet;
+    };
+    const EntityId origin = addPlanet("Origin", 1.0, 0.0);
+    const EntityId destination = addPlanet("Destination", 2.0, kPi / 2.0);
+    const f64 wellRadius = gravityWellRadius(world.components<CelestialBody>().get(origin));
+
+    // Start inside the origin's gravity well: the ship must fly out before it may jump.
+    const OrbitState start = bodyStateAt(world, origin, simulation.now());
+    const EntityId ship = world.createEntity();
+    world.components<Kinematics>().add(
+        ship, {start.position + Vec3d{0.5 * wellRadius, 0.0, 0.0}, start.velocity, {}});
+    world.components<ShipDrive>().add(ship, {50'000.0, 15'000'000.0, 1.5e9, 5.0});
+    ShipControl control;
+    control.mode = FlightMode::Approach;
+    control.target = destination;
+    control.standoff = standoffDistance(world, destination);
+    world.components<ShipControl>().add(ship, control);
+
+    u32 jumps = 0;
+    u32 dropOuts = 0;
+    u32 arrivals = 0;
+    simulation.events().channel<HyperspaceTransition>().subscribe(
+        [&](const HyperspaceTransition& e, const TickContext& c) {
+            const Vec3d originNow = bodyStateAt(c.world, origin, c.now).position;
+            const Vec3d destinationNow = bodyStateAt(c.world, destination, c.now).position;
+            if (e.entering) {
+                ++jumps;
+                GX_EXPECT(length(e.position - originNow) >= wellRadius); // never jumps inside a well
+            } else {
+                ++dropOuts;
+                // Drops out on the edge of the destination's well (the planet moves ~5 km per 200 ms step).
+                GX_EXPECT_NEAR(length(e.position - destinationNow), wellRadius, 20'000.0);
+            }
+        });
+    simulation.events().channel<ShipArrived>().subscribe(
+        [&](const ShipArrived&, const TickContext&) { ++arrivals; });
+
+    for (int minute = 0; minute < 30 && arrivals == 0; ++minute) {
+        simulation.runFor(SimDuration::minutes(1));
+    }
+    GX_EXPECT_EQ(jumps, 1u);
+    GX_EXPECT_EQ(dropOuts, 1u);
+    GX_EXPECT_EQ(arrivals, 1u);
+    // About 2.2 AU: well exit + charge + ~3 min of hyperspace + sublight approach.
+    GX_EXPECT(simulation.now() < SimTime::epoch() + SimDuration::minutes(12));
+    GX_EXPECT(world.components<ShipControl>().get(ship).phase == DrivePhase::Sublight);
+}
+
 GX_TEST(Space, InspectorListsNamedFields) {
     struct Collector final : FieldVisitor {
         std::vector<std::string> lines;

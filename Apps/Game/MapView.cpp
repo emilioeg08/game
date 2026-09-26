@@ -25,6 +25,10 @@ constexpr ImU32 kPlayerColor = IM_COL32(120, 255, 150, 255);
 constexpr ImU32 kHaulerColor = IM_COL32(120, 170, 255, 255);
 constexpr ImU32 kCourseColor = IM_COL32(120, 255, 150, 90);
 constexpr ImU32 kThrustColor = IM_COL32(255, 150, 70, 220);
+constexpr ImU32 kWellColor = IM_COL32(150, 110, 200, 70);
+constexpr ImU32 kTruthColor = IM_COL32(255, 90, 200, 150); // debug: real positions of other factions
+constexpr ImU32 kHyperspaceColor = IM_COL32(200, 160, 255, 200);
+constexpr f64 kSpeedOfLight = 299'792'458.0;
 
 struct BodyStyle {
     ImU32 color;
@@ -106,6 +110,32 @@ const char* displayName(FlightMode mode) {
     }
 }
 
+const char* displayName(DrivePhase phase) {
+    switch (phase) {
+    case DrivePhase::Sublight:
+        return "Sublumínico";
+    case DrivePhase::Charging:
+        return "Cargando salto";
+    case DrivePhase::Hyperspace:
+        return "Hiperespacio";
+    default:
+        return "?";
+    }
+}
+
+const char* displayName(ContactLevel level) {
+    switch (level) {
+    case ContactLevel::Unknown:
+        return "Desconocido";
+    case ContactLevel::Classified:
+        return "Clasificado";
+    case ContactLevel::Identified:
+        return "Identificado";
+    default:
+        return "?";
+    }
+}
+
 std::string formatDistance(f64 meters) {
     if (meters < 1'000.0) {
         return std::format("{:.0f} m", meters);
@@ -117,6 +147,10 @@ std::string formatDistance(f64 meters) {
 }
 
 std::string formatSpeed(f64 metersPerSecond) {
+    if (metersPerSecond >= 0.1 * kSpeedOfLight) {
+        return std::format("{:.0f} km/s ({:.2f} c)", metersPerSecond / 1'000.0,
+                           metersPerSecond / kSpeedOfLight);
+    }
     return std::format("{:.1f} km/s", metersPerSecond / 1'000.0);
 }
 
@@ -130,32 +164,44 @@ Vec3d MapView::toWorld(ImVec2 screen) const {
             m_camera.center.y - (screen.y - m_viewCenter.y) * m_camera.metersPerPixel, 0.0};
 }
 
-EntityId MapView::pick(const SystemSnapshot& snapshot, ImVec2 screen) const {
-    EntityId best;
+MapSelection MapView::pick(const SystemSnapshot& snapshot, ImVec2 screen, const MapOptions& options) const {
+    MapSelection best;
     float bestDistanceSq = kPickRadius * kPickRadius;
-    // Ships first: they sit on top of the bodies they orbit and are what the player usually wants.
+    // Ships and contacts first: they sit on top of the bodies they orbit and are what the player usually
+    // wants.
     for (const ShipView& ship : snapshot.ships) {
+        if (ship.faction != snapshot.playerFaction && !options.showTruth) {
+            continue; // other factions are only known through sensors
+        }
         const float d = distanceSq(toScreen(ship.position), screen);
         if (d < bestDistanceSq) {
             bestDistanceSq = d;
-            best = ship.id;
+            best = {ship.id, 0};
         }
     }
-    if (best.isValid()) {
+    for (const ContactView& contact : snapshot.contacts) {
+        const float d = distanceSq(toScreen(contact.position), screen);
+        if (d < bestDistanceSq) {
+            bestDistanceSq = d;
+            best = {{}, contact.trackId};
+        }
+    }
+    if (!best.empty()) {
         return best;
     }
     for (const BodyView& body : snapshot.bodies) {
         const float radius = std::max(static_cast<float>(body.radius / m_camera.metersPerPixel), kPickRadius);
         const float d = distanceSq(toScreen(body.position), screen);
-        if (d < radius * radius && (!best.isValid() || d < bestDistanceSq)) {
+        if (d < radius * radius && (best.empty() || d < bestDistanceSq)) {
             bestDistanceSq = d;
-            best = body.id;
+            best = {body.id, 0};
         }
     }
     return best;
 }
 
-MapView::Interaction MapView::update(const SystemSnapshot& snapshot, EntityId selected) {
+MapView::Interaction MapView::update(const SystemSnapshot& snapshot, const MapSelection& selected,
+                                     const MapOptions& options) {
     const ImGuiIO& io = ImGui::GetIO();
     m_viewSize = io.DisplaySize;
     m_viewCenter = {io.DisplaySize.x * 0.5f, io.DisplaySize.y * 0.5f};
@@ -166,10 +212,10 @@ MapView::Interaction MapView::update(const SystemSnapshot& snapshot, EntityId se
     }
 
     Interaction interaction;
-    EntityId hovered;
+    MapSelection hovered;
     if (!io.WantCaptureMouse) {
         const ImVec2 mouse = io.MousePos;
-        hovered = pick(snapshot, mouse);
+        hovered = pick(snapshot, mouse, options);
 
         if (io.MouseWheel != 0.0f) {
             const Vec3d before = toWorld(mouse);
@@ -189,24 +235,25 @@ MapView::Interaction MapView::update(const SystemSnapshot& snapshot, EntityId se
         if (ImGui::IsMouseReleased(ImGuiMouseButton_Left)) {
             if (!m_panning) {
                 interaction.leftClicked = true;
-                interaction.leftClickedEntity = hovered;
+                interaction.leftClickedTarget = hovered;
             }
             m_panning = false;
         }
         if (ImGui::IsMouseClicked(ImGuiMouseButton_Right)) {
             interaction.rightClicked = true;
-            interaction.rightClickedEntity = hovered;
+            interaction.rightClickedTarget = hovered;
             interaction.rightClickedPoint = toWorld(mouse);
         }
     } else if (!ImGui::IsMouseDown(ImGuiMouseButton_Left)) {
         m_panning = false;
     }
 
-    draw(snapshot, selected, hovered);
+    draw(snapshot, selected, hovered, options);
     return interaction;
 }
 
-void MapView::draw(const SystemSnapshot& snapshot, EntityId selected, EntityId hovered) {
+void MapView::draw(const SystemSnapshot& snapshot, const MapSelection& selected, const MapSelection& hovered,
+                   const MapOptions& options) {
     ImDrawList& drawList = *ImGui::GetBackgroundDrawList();
     const f64 mpp = m_camera.metersPerPixel;
 
@@ -227,6 +274,24 @@ void MapView::draw(const SystemSnapshot& snapshot, EntityId selected, EntityId h
         drawList.AddPolyline(points.data(), static_cast<int>(count), kOrbitColor, 1.0f, ImDrawFlags_Closed);
     }
 
+    // Gravity wells: dashed rings where hyperspace is not allowed (only when they are a useful size on
+    // screen).
+    for (const BodyView& body : snapshot.bodies) {
+        const f64 screenRadius = body.wellRadius / mpp;
+        if (body.wellRadius <= 0.0 || screenRadius < 12.0 || screenRadius > 2e5) {
+            continue;
+        }
+        const ImVec2 center = toScreen(body.position);
+        constexpr int kDashes = 48;
+        for (int i = 0; i < kDashes; i += 2) {
+            const f32 a0 = static_cast<f32>(kTwoPi * i / kDashes);
+            const f32 a1 = static_cast<f32>(kTwoPi * (i + 1) / kDashes);
+            const auto r = static_cast<float>(screenRadius);
+            drawList.AddLine({center.x + r * std::cos(a0), center.y + r * std::sin(a0)},
+                             {center.x + r * std::cos(a1), center.y + r * std::sin(a1)}, kWellColor, 1.0f);
+        }
+    }
+
     // Bodies.
     for (const BodyView& body : snapshot.bodies) {
         const BodyStyle style = styleOf(body.kind);
@@ -239,39 +304,60 @@ void MapView::draw(const SystemSnapshot& snapshot, EntityId selected, EntityId h
         } else {
             drawList.AddCircleFilled(center, radius, style.color);
         }
-        if (body.id == selected || body.id == hovered) {
-            drawList.AddCircle(center, radius + 4.0f, body.id == selected ? kSelectionColor : kDimText, 0,
-                               1.5f);
+        if (body.id == selected.entity || body.id == hovered.entity) {
+            drawList.AddCircle(center, radius + 4.0f, body.id == selected.entity ? kSelectionColor : kDimText,
+                               0, 1.5f);
         }
         // Labels: stars and planets always; moons and stations once their orbit is visibly large.
         const bool isMinor = body.kind == BodyKind::Moon || body.kind == BodyKind::Station;
         const bool orbitVisible = body.orbitPath != nullptr && !body.orbitPath->empty() &&
                                   length(body.orbitPath->front()) / mpp > 25.0;
-        if (!isMinor || orbitVisible || body.id == selected || body.id == hovered) {
+        if (!isMinor || orbitVisible || body.id == selected.entity || body.id == hovered.entity) {
             addText(drawList, {center.x + radius + 4.0f, center.y - 7.0f},
                     isMinor ? kDimText : kBackgroundText, body.name);
         }
     }
 
-    // Ships: course line, thrust plume, hull triangle pointing along the velocity.
+    drawContacts(drawList, snapshot, selected, hovered, options);
+
+    // Own ships (and, when debugging, every ship where it really is): course line, thrust plume, hull
+    // triangle pointing along the velocity.
     for (const ShipView& ship : snapshot.ships) {
+        const bool own = ship.faction == snapshot.playerFaction;
+        if (!own && !options.showTruth) {
+            continue;
+        }
         const ImVec2 center = toScreen(ship.position);
-        const ImU32 color = ship.isPlayer ? kPlayerColor : kHaulerColor;
+        const ImU32 color = ship.isPlayer ? kPlayerColor : (own ? kHaulerColor : kTruthColor);
+        if (ship.phase == DrivePhase::Hyperspace) {
+            // Streak behind the ship, along its motion.
+            const f64 speed = length(ship.velocity);
+            if (speed > 0.0) {
+                const ImVec2 back{static_cast<float>(-ship.velocity.x / speed),
+                                  static_cast<float>(ship.velocity.y / speed)};
+                drawList.AddLine(center, {center.x + back.x * 40.0f, center.y + back.y * 40.0f},
+                                 kHyperspaceColor, 3.0f);
+            }
+        } else if (ship.phase == DrivePhase::Charging) {
+            drawList.AddCircle(center, 11.0f, kHyperspaceColor, 0, 1.5f);
+        }
+        const bool isSelected = ship.id == selected.entity;
+        const bool isHovered = ship.id == hovered.entity;
         const bool travelling =
             (ship.mode == FlightMode::MoveTo || ship.mode == FlightMode::Approach) && !ship.arrived;
-        if (travelling && (ship.isPlayer || ship.id == selected)) {
+        if (travelling && (ship.isPlayer || isSelected)) {
             drawList.AddLine(center, toScreen(ship.targetPosition),
-                             ship.isPlayer ? kCourseColor : IM_COL32(120, 170, 255, 90), 1.0f);
+                             ship.isPlayer ? kCourseColor : kTruthColor, 1.0f);
         }
-        Vec3d heading = ship.velocity;
-        const f64 headingLength = length(heading);
-        const ImVec2 forward = headingLength > 1.0 ? ImVec2{static_cast<float>(heading.x / headingLength),
-                                                            static_cast<float>(-heading.y / headingLength)}
-                                                   : ImVec2{0.0f, -1.0f};
+        const f64 headingLength = length(ship.velocity);
+        const ImVec2 forward = headingLength > 1.0
+                                   ? ImVec2{static_cast<float>(ship.velocity.x / headingLength),
+                                            static_cast<float>(-ship.velocity.y / headingLength)}
+                                   : ImVec2{0.0f, -1.0f};
         const ImVec2 side{-forward.y, forward.x};
         const float size = ship.isPlayer ? 8.0f : 6.0f;
         const f64 thrust = length(ship.acceleration);
-        if (thrust > 1e-3) {
+        if (thrust > 1e-3 && own) {
             const ImVec2 plume{static_cast<float>(-ship.acceleration.x / thrust),
                                static_cast<float>(ship.acceleration.y / thrust)};
             drawList.AddLine(center, {center.x + plume.x * size * 1.8f, center.y + plume.y * size * 1.8f},
@@ -283,16 +369,58 @@ void MapView::draw(const SystemSnapshot& snapshot, EntityId selected, EntityId h
                                    {center.x - forward.x * size * 0.6f - side.x * size * 0.6f,
                                     center.y - forward.y * size * 0.6f - side.y * size * 0.6f},
                                    color);
-        if (ship.id == selected || ship.id == hovered) {
-            drawList.AddCircle(center, size + 5.0f, ship.id == selected ? kSelectionColor : kDimText, 0,
-                               1.5f);
+        if (isSelected || isHovered) {
+            drawList.AddCircle(center, size + 5.0f, isSelected ? kSelectionColor : kDimText, 0, 1.5f);
         }
-        if (ship.isPlayer || ship.id == selected || ship.id == hovered || mpp < 2'000.0) {
+        if (ship.isPlayer || isSelected || isHovered || (own && mpp < 2'000.0)) {
             addText(drawList, {center.x + size + 4.0f, center.y + 2.0f}, color, ship.name);
         }
     }
 
     drawScaleBar(drawList);
+}
+
+void MapView::drawContacts(ImDrawList& drawList, const SystemSnapshot& snapshot, const MapSelection& selected,
+                           const MapSelection& hovered, const MapOptions& options) {
+    const f64 mpp = m_camera.metersPerPixel;
+    for (const ContactView& contact : snapshot.contacts) {
+        const ImVec2 center = toScreen(contact.position);
+        // Fresh tracks are bright; stale ones fade until they are lost.
+        const auto alpha = static_cast<u8>(contact.ageSeconds < 2.0 ? 235 : 110);
+        ImU32 color = IM_COL32(190, 190, 190, alpha); // unknown
+        if (contact.level == ContactLevel::Classified) {
+            color = IM_COL32(235, 200, 120, alpha);
+        } else if (contact.level == ContactLevel::Identified) {
+            color = contact.faction == content::kFactionIndependent ? IM_COL32(120, 170, 255, alpha)
+                                                                    : IM_COL32(255, 110, 100, alpha);
+        }
+        const f64 sigmaPixels = contact.uncertainty / mpp;
+        if (sigmaPixels > 4.0 && sigmaPixels < 1e5) {
+            drawList.AddCircle(center, static_cast<float>(sigmaPixels), IM_COL32(190, 190, 190, 60), 0, 1.0f);
+        }
+        constexpr float kSize = 6.0f;
+        drawList.AddQuad({center.x, center.y - kSize}, {center.x + kSize, center.y},
+                         {center.x, center.y + kSize}, {center.x - kSize, center.y}, color, 1.5f);
+        if (contact.level == ContactLevel::Identified) {
+            drawList.AddCircleFilled(center, 2.0f, color);
+        }
+        const bool isSelected = selected.contact == contact.trackId;
+        if (isSelected || hovered.contact == contact.trackId) {
+            drawList.AddCircle(center, kSize + 5.0f, isSelected ? kSelectionColor : kDimText, 0, 1.5f);
+        }
+        std::string label;
+        if (contact.level == ContactLevel::Identified && !contact.name.empty()) {
+            label = std::string(contact.name);
+        } else if (contact.level == ContactLevel::Classified) {
+            label = std::format("{}?", content::kShipClasses[contact.shipClass].name);
+        } else {
+            label = std::format("?{}", contact.trackId);
+        }
+        if (options.showTruth && contact.ghost) {
+            label += " [fantasma]";
+        }
+        addText(drawList, {center.x + kSize + 4.0f, center.y - 7.0f}, color, label);
+    }
 }
 
 void MapView::drawScaleBar(ImDrawList& drawList) const {

@@ -184,3 +184,45 @@ sustituya y explique por qué.
   16,6 µs/paso (×4). Con 13 naves, de 8,1 a 4,2 µs/paso.
 - **Medición:** con 200 naves, repartir el pase de naves entre hilos era más lento que hacerlo en serie
   (~40 ns por nave). Se sube el grain a 256: el paralelismo empieza con miles de naves.
+
+## ADR-021 — Escala temporal: ×1 = tiempo real; velocidades ×1, ×3 y ×10 (directiva del usuario)
+
+- **Decisión:** el cliente ofrece solo pausa, ×1, ×3 y ×10, con ×1 como tiempo real. Todo el contenido se
+  reescala para que un viaje entre planetas dure minutos a ×1: los cargueros esperan en puerto de 30 s a
+  3 min, y el vuelo va a 200 ms en modo estratégico y a 50 ms con pilotaje manual. Los tests y benchmarks
+  headless siguen pudiendo simular tan rápido como permita la CPU.
+
+## ADR-022 — Motor sublumínico + hiperespacio con pozos gravitatorios (sustituye parte de ADR-017)
+
+- **Decisión:** el sublumínico newtoniano sirve para maniobrar (Correo: 50 km/s² y crucero de
+  15.000 km/s; Carguero: 15 km/s² y 6.000 km/s). El hiperespacio sirve para cruzar el sistema (Correo:
+  1,5 millones de km/s con 5 s de carga; Carguero: 600.000 km/s con 12 s). No se puede saltar dentro de un
+  pozo gravitatorio (estrella: 20 radios; planetas: 25 radios). Se sale en el borde del pozo del destino,
+  con la velocidad igualada a la suya. Las órdenes que no son de autopiloto cancelan la carga o provocan
+  una salida de emergencia.
+- **Verificado:** `Space.HyperspaceJumpsOutsideWellsAndDropsAtTheTargetWell` comprueba que la nave sale del
+  pozo, salta una sola vez fuera de él, sale del hiperespacio en el borde del pozo del destino (±20 km) y
+  llega en menos de 12 min para ~2,2 UA.
+
+## ADR-023 — Sensores: imagen por facción, sin omnisciencia
+
+- **Contexto:** prompt §14. Ni el jugador ni la IA deben saberlo todo; los sensores pasivos son discretos e
+  imprecisos, los activos son precisos pero delatan al emisor, y hay ruido, falsos positivos,
+  identificación parcial y pérdida de contacto. Las referencias muestran detección activa y pasiva, firma de
+  sensores y un transpondedor que se puede apagar.
+- **Decisión:**
+  - Cada nave tiene una emisión = base + parte del empuje en uso + radar encendido + carga o viaje en
+    hiperespacio.
+  - SNR pasivo = emisión · sensibilidad / d². SNR activo = potencia · sección / d⁴.
+  - La detección es segura con SNR ≥ 1 y probabilística entre 0,25 y 1.
+  - Hay tres niveles de conocimiento: desconocido, clasificado (SNR ≥ 4) e identificado (SNR pasivo ≥ 25,
+    SNR activo ≥ 4, o transpondedor a menos de 1 UA).
+  - La posición estimada lleva un error proporcional a d/√SNR.
+  - Los contactos que no se refrescan en 20 s se pierden, y hay un 4 % de fantasmas por escaneo que duran 4 s.
+  - Cada facción guarda una `FactionPicture` (parte del estado guardado). El cliente dibuja solo la del
+    jugador; "Mostrar la verdad" es una opción de depuración.
+- **Simplificación consciente:** la asociación de pistas es perfecta (cada contacto sabe internamente a qué
+  nave corresponde), pero ese dato nunca llega a la interfaz salvo cuando la nave está identificada. Ir a un
+  contacto significa ir a su *posición estimada*, no a la nave real.
+- **Coste:** O(observadores × objetivos de otras facciones) por escaneo (1 Hz). Con dos facciones es
+  despreciable. Con muchas facciones hará falta partición espacial.

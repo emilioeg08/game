@@ -42,6 +42,8 @@ int main(int argc, char** argv) {
             options.followStar = true;
         } else if (arg == "--fly-to") {
             ok = parseNumber(value(), options.flyToPort);
+        } else if (arg == "--truth") {
+            options.showTruth = true;
         } else if (arg == "--select") {
             options.select = true;
         } else {
