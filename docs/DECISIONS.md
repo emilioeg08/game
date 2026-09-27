@@ -381,3 +381,30 @@ sustituya y explique por qué.
 - **Medido:** a 4 h, 6 piratas dan *más* entregas que ninguno: el capital nuevo de los cargueros de
   reemplazo lo enmascara. A 8 h la relación es robusta (12.192 frente a 9.090 t), y la prueba causal pasó
   a 8 h.
+
+## ADR-030 — Patrullas de la Autoridad: presupuesto explícito, sensores propios y llamadas de socorro
+
+- **Contexto:** la tesorería de ADR-029 solo acumulaba. Prompt §30: el dinero debe tener consecuencias,
+  y la seguridad de las rutas debe depender de algo que se pueda romper.
+- **Decisión:**
+  - Hay una cuarta facción, la **Autoridad**, con la clase Patrullero.
+  - `Game.Authority` (cada 2 min, en `EventResolution`, porque crea y destruye entidades) paga el
+    mantenimiento, pone en servicio un patrullero si tiene su precio más 4 h de mantenimiento de la flota
+    ampliada, y da de baja uno si la tesorería queda en negativo.
+  - `Game.Patrols` (1 s) es una máquina de estados (patrulla, persecución, reparación) que solo lee la
+    imagen de sensores de la Autoridad.
+  - Los cargueros atacados emiten **llamadas de socorro** (`DistressCall`: posición e instante, guardadas
+    en el estado) por la red de comerciantes. Acude el patrullero libre más cercano.
+  - Los piratas evitan las patrullas.
+  - La muerte de un jugador hostil salda su cuenta.
+- **Medición que cambió el diseño:** en la primera versión las patrullas solo hacían rondas por los
+  planetas con más pérdidas. Con 4 semillas no cambiaban nada: 56 frente a 58 cargueros perdidos, y 13
+  piratas abatidos en 40 h. La causa es de información: un pirata al acecho es silencioso (solo
+  clasificable a menos de ~32.000 km), y la ronda llega tarde a donde ya no está. Con llamadas de socorro,
+  las pérdidas bajan un 41 % en las mismas 4 semillas (56 → 33).
+- **Lección sobre la medición:** con 5 perturbaciones mínimas de la misma semilla, las entregas varían
+  entre 9.800 y 14.400 t. Una sola ejecución no basta para decidir. Las decisiones de equilibrio se toman
+  con varias variantes, y las pruebas causales comparan una trayectoria fija con un margen amplio (8 h,
+  16 frente a 8 pérdidas).
+- **Consecuencias:** el diario distingue jugador, noticias y tráfico (`JournalKind`). El tráfico se borra
+  primero al llenarse y el cliente lo oculta por defecto.

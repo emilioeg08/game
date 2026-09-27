@@ -568,7 +568,7 @@ void GameApp::drawShipPanel() {
         ImGui::TextDisabled("Carga: %s", cargo.c_str());
     }
     const f64 reputation = m_snapshot.playerReputation;
-    const char* standing = m_snapshot.playerHostile ? "hostil: los puertos no te atienden"
+    const char* standing = m_snapshot.playerHostile ? "hostil: la Autoridad te busca"
                            : reputation <= -10.0    ? "sospechosa"
                            : reputation >= 20.0     ? "respetada"
                                                     : "neutral";
@@ -1026,12 +1026,27 @@ void GameApp::drawJournal() {
     ImGui::SetNextWindowPos({10.0f, display.y * 0.55f + 100.0f}, ImGuiCond_FirstUseEver);
     ImGui::SetNextWindowSize({440.0f, display.y * 0.45f - 140.0f}, ImGuiCond_FirstUseEver);
     ImGui::Begin("Diario");
+    ImGui::Checkbox("Tráfico de otras naves", &m_showTraffic);
+    ImGui::Separator();
+    ImGui::BeginChild("entries");
     const auto& journal = sandbox().journal();
     for (auto it = journal.rbegin(); it != journal.rend(); ++it) {
+        if (it->kind == JournalKind::Traffic && !m_showTraffic) {
+            continue;
+        }
         ImGui::TextDisabled("%s", formatSimTime(it->time, content::kEpochYear).c_str());
         ImGui::SameLine();
+        if (it->kind == JournalKind::News) {
+            ImGui::PushStyleColor(ImGuiCol_Text, color(230, 200, 120));
+        } else if (it->kind == JournalKind::Traffic) {
+            ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyle().Colors[ImGuiCol_TextDisabled]);
+        }
         ImGui::TextWrapped("%s", it->text.c_str());
+        if (it->kind != JournalKind::Player) {
+            ImGui::PopStyleColor();
+        }
     }
+    ImGui::EndChild();
     ImGui::End();
 }
 
@@ -1059,6 +1074,13 @@ void GameApp::drawDebugPanel() {
     ImGui::Text("Salarios pagados %lld cr · quiebras %llu · abordajes %llu",
                 static_cast<long long>(game.wagesPaid), static_cast<unsigned long long>(game.bankruptcies),
                 static_cast<unsigned long long>(game.boardings));
+    ImGui::Text("Patrullas: %zu en servicio · %llu puestas · %llu perdidas · %llu piratas abatidos · "
+                "mantenimiento %lld cr",
+                simulation().world().components<PatrolBrain>().size(),
+                static_cast<unsigned long long>(game.patrolsCommissioned),
+                static_cast<unsigned long long>(game.patrolsLost),
+                static_cast<unsigned long long>(game.piratesKilledByPatrols),
+                static_cast<long long>(game.patrolUpkeepPaid));
     ImGui::Text("Combate: %llu disparos, %llu impactos, %llu naves destruidas",
                 static_cast<unsigned long long>(combat.shotsFired),
                 static_cast<unsigned long long>(combat.hits),

@@ -45,6 +45,9 @@ struct SandboxConfig {
     // Tactical steps last this long after the player was last hit.
     SimDuration combatAlert = SimDuration::seconds(30);
     SimDuration economyPeriod = SimDuration::seconds(10);
+    // The Authority keeps at most this many patrols, as far as its treasury allows (ADR-030).
+    u32 maxPatrols = 3;
+    SimDuration authorityReview = SimDuration::minutes(2);
 };
 
 // Player input. Validated by the handler (never trusted).
@@ -157,14 +160,40 @@ struct PirateBrain {
     }
 };
 
+enum class PatrolState : u8 { Patrolling, Engaging, Returning, Count };
+
+[[nodiscard]] const char* toString(PatrolState state);
+
+// Authority patrol behaviour state. Decisions use only the Authority's sensor picture.
+struct PatrolBrain {
+    PatrolState state = PatrolState::Patrolling;
+    SimTime nextMove;    // Patrolling: when to move to another beat; Engaging: when to give up
+    u32 decisions = 0;   // key for the per-decision random streams
+    u32 ignoreTrack = 0; // a suspect given up on
+
+    template <typename Archive>
+    void io(Archive& ar) {
+        ar.io("state", state);
+        ar.io("nextMove", nextMove);
+        ar.io("decisions", decisions);
+        ar.io("ignoreTrack", ignoreTrack);
+    }
+};
+
+// Player: what happens to you. News: what the Authority or the markets announce. Traffic: NPC comings and
+// goings (plenty of them: the client hides them unless asked).
+enum class JournalKind : u8 { Player, News, Traffic, Count };
+
 struct JournalEntry {
     SimTime time;
     std::string text;
+    JournalKind kind = JournalKind::Player;
 
     template <typename Archive>
     void io(Archive& ar) {
         ar.io("time", time);
         ar.io("text", text);
+        ar.io("kind", kind);
     }
 };
 
@@ -190,6 +219,14 @@ struct SandboxStats {
     i64 bountiesPaid = 0;
     u64 bankruptcies = 0;
     u64 boardings = 0;
+    u64 patrolsCommissioned = 0;
+    u64 patrolsDecommissioned = 0;
+    u64 patrolsLost = 0;
+    i64 patrolUpkeepPaid = 0;
+    u64 piratesKilledByPatrols = 0;
+    u64 wantedChases = 0; // patrols going after a hostile player
+    u64 distressCalls = 0;
+    u64 distressAnswered = 0;
 
     template <typename Archive>
     void io(Archive& ar) {
@@ -214,6 +251,14 @@ struct SandboxStats {
         ar.io("bountiesPaid", bountiesPaid);
         ar.io("bankruptcies", bankruptcies);
         ar.io("boardings", boardings);
+        ar.io("patrolsCommissioned", patrolsCommissioned);
+        ar.io("patrolsDecommissioned", patrolsDecommissioned);
+        ar.io("patrolsLost", patrolsLost);
+        ar.io("patrolUpkeepPaid", patrolUpkeepPaid);
+        ar.io("piratesKilledByPatrols", piratesKilledByPatrols);
+        ar.io("wantedChases", wantedChases);
+        ar.io("distressCalls", distressCalls);
+        ar.io("distressAnswered", distressAnswered);
     }
 };
 
@@ -228,6 +273,18 @@ struct PortDanger {
         ar.io("port", port);
         ar.io("level", level);
         ar.io("updated", updated);
+    }
+};
+
+// A trader under fire calls for help through the network: where, and when (patrols answer it).
+struct DistressCall {
+    Vec3d position;
+    SimTime time;
+
+    template <typename Archive>
+    void io(Archive& ar) {
+        ar.io("position", position);
+        ar.io("time", time);
     }
 };
 
@@ -297,7 +354,11 @@ private:
     void onTradeCommand(const TradeCommand& command, const TickContext& context);
     void onBoardCommand(const BoardCommand& command, const TickContext& context);
     void updatePayroll(const TickContext& context);
-    [[nodiscard]] bool witnessedByTraders(EntityId ship) const;
+    // Whether `faction`'s sensor picture has `ship` identified (a witness that can name it).
+    [[nodiscard]] bool witnessedBy(u32 faction, EntityId ship) const;
+    EntityId spawnPatrol(World& world, SimTime now, Rng& rng, u32 serial);
+    void updatePatrols(const TickContext& context);
+    void updateAuthority(const TickContext& context);
     void changeReputation(f64 delta);
     void payBounty(World& world, const std::string& name, SimTime now);
     void collectTax(i64 tax);
@@ -312,7 +373,7 @@ private:
     void onSensorCommand(const SensorCommand& command, const TickContext& context);
     void onEngageCommand(const EngageCommand& command, const TickContext& context);
     void updateFlightRate(const World& world, SimTime now);
-    void addJournal(SimTime time, std::string text);
+    void addJournal(SimTime time, std::string text, JournalKind kind = JournalKind::Player);
     void rebuildPorts(const World& world);
     [[nodiscard]] std::string nameOf(const World& world, EntityId entity) const;
     [[nodiscard]] EntityId nearestStation(const World& world, const Vec3d& position, SimTime now) const;
@@ -342,6 +403,7 @@ private:
     i64 m_treasury = 0;
     f64 m_reputation = 0.0;
     std::vector<Offense> m_offenses;
+    std::vector<DistressCall> m_distress;
     PriceBook m_playerPrices;
     PriceBook m_traderPrices;
     std::vector<PortDanger> m_danger;

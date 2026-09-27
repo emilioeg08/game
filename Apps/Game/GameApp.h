@@ -110,6 +110,7 @@ private:
     bool m_thrusting = false;
 
     bool m_showHelp = true;
+    bool m_showTraffic = false; // journal: NPC comings and goings
     bool m_showDebug = false;
     bool m_quit = false;
     std::string m_status;

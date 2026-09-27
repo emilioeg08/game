@@ -6,7 +6,7 @@
 > (`Game/Sandbox/Content.h`) o en parámetros de generación, no dispersos por los sistemas, para que moverlos
 > a ficheros de datos (modding) sea un cambio local.
 
-## Estado: slice M3.1 "Consecuencias"
+## Estado: slice M3.2 "Patrullas de la Autoridad"
 
 Se puede:
 
@@ -20,12 +20,14 @@ Se puede:
   existencias; los cargueros compran y venden por beneficio, y el jugador también;
 - **cargar con las consecuencias** (M3.1): impuestos y reparaciones de pago a la Autoridad del sistema,
   salarios y quiebras de los comerciantes, recompensas por piratas, reputación según lo que los
-  comerciantes han visto, y abordaje de naves sin energía.
+  comerciantes han visto, y abordaje de naves sin energía;
+- ver cómo la Autoridad **patrulla** con lo que recauda (M3.2): acude a las llamadas de socorro, persigue
+  piratas y va a por ti si eres hostil.
 
 Con esto el primer vertical slice del prompt (§5) está completo.
 
-**Todavía no hay:** crédito, deuda, seguros ni inversión; policía o patrullas; misiles ni defensa puntual;
-facciones políticas; más de un sistema estelar.
+**Todavía no hay:** crédito, deuda, seguros ni inversión; misiles ni defensa puntual; facciones políticas;
+más de un sistema estelar.
 
 ## Escala, unidades y tiempo
 
@@ -287,7 +289,54 @@ velocidad igualada (±200 m/s):
 - los salarios retiran 35.900 cr;
 - hay 3 quiebras.
 
-La tesorería solo crece: el paso natural es que pague **patrullas** contra los piratas (pendiente).
+La tesorería paga las patrullas (ver abajo).
+
+## Patrullas de la Autoridad (ADR-030)
+
+**Presupuesto, con reglas explícitas.** Cada 2 minutos la Autoridad:
+
+- paga el mantenimiento de sus patrulleros (25 cr/min cada uno, 1.500 cr/h);
+- pone en servicio uno nuevo si tiene su precio (6.000 cr) más 4 horas de mantenimiento de la flota
+  ampliada, hasta un máximo de 3;
+- da de baja uno si la tesorería queda en negativo.
+
+Todo sale en el diario como noticia.
+
+**Patrullero** (Autoridad): 45 km/s², crucero de 14.000 km/s, hiperespacio a 1.400.000 km/s. Estructura
+600, dos láseres y un cañón de riel. Tiene los mejores sensores del sistema (sensibilidad 2e12, radar 5e34)
+y va a la vista: radar y transpondedor siempre encendidos.
+
+**IA del patrullero.** Decide solo con la imagen de sensores de la Autoridad:
+
+1. **Sospechosos:** piratas identificados, cualquier contacto clasificado como Corsario, y tú si eres
+   hostil. Persigue al más cercano a menos de 1 millón de km (a 150 km) y dispara. Abandona si lo pierde,
+   si se aleja más de 2 millones de km o a los 5 minutos.
+2. **Socorro:** un carguero atacado avisa con su posición por la red de comerciantes. Acude el patrullero
+   libre más cercano.
+3. **Ronda:** si no hay nada que hacer, vigila el borde del pozo del planeta con más pérdidas recientes.
+4. **Reparación:** con la estructura por debajo del 50 % o sin armas, vuelve a la estación más cercana
+   (reparación a cargo de la Autoridad).
+
+**Los piratas** no eligen patrulleros como presa y rompen la caza si hay uno a menos de 300.000 km.
+
+**Tú y la Autoridad:**
+
+- Atacar un patrullero cuesta −15 de reputación (−40 si lo destruyes), si la Autoridad te identifica.
+- Hostil, te persiguen.
+- Si te destruyen siendo hostil, tu cuenta queda saldada (reputación −20) y no te esperan a la salida de la
+  estación.
+
+**Medido** (10 h, 3 piratas, 5 variantes de la semilla 2400):
+
+| | Cargueros perdidos (media) | Entregas |
+|---|---|---|
+| Sin patrullas | 18,2 | 11.220–13.301 t |
+| Con 3 patrullas | 10,0 (−45 %) | 9.793–14.449 t |
+
+- Las entregas no cambian más allá del ruido. Cada carguero perdido vuelve con capital nuevo, lo que
+  enmascara el daño.
+- Sin las llamadas de socorro, las patrullas no servían: llegaban tarde a donde ya no había piratas
+  (ADR-030).
 
 ## Facciones y personajes (mínimo)
 
@@ -348,6 +397,8 @@ La tesorería solo crece: el paso natural es que pague **patrullas** contra los 
 
 - Mapa 2D oscuro con órbitas tenues, colores por tipo de cuerpo, triángulos orientados por la velocidad
   para las naves, llama de empuje, línea de rumbo, barra de escala en km o UA, y etiquetas según el zoom.
+- Diario: lo tuyo en blanco y las noticias en ámbar. El tráfico de otras naves está oculto salvo que marques
+  la casilla.
 - Paneles: tiempo (arriba), nave (izquierda, con barras de salud por módulo y estado de cada arma: fijado,
   sin fijación, fuera de alcance o recargando), selección con inspector (derecha), diario (abajo a la
   izquierda) y depuración (F3).
@@ -361,8 +412,8 @@ La tesorería solo crece: el paso natural es que pague **patrullas** contra los 
 
 1. Guerra electrónica (interferencias, señuelos) y consecuencias legales directas de ir sin transpondedor.
 2. Misiles, defensa puntual, blindaje o escudos.
-3. Patrullas de la Autoridad pagadas con la tesorería; policía que persigue al jugador hostil; piratas que
-   saquean en lugar de destruir.
+3. Piratas que saquean en lugar de destruir; sensores fijos en las estaciones; patrullas que escoltan
+   convoyes.
 4. Resto de la economía del §18: crédito, deuda, seguros e inversión (comerciantes que compran naves).
 5. Población con efectos: la escasez debería afectar a la estabilidad y al crecimiento.
 6. Viaje entre sistemas y la estructura de la galaxia.

@@ -3,7 +3,7 @@
 Motor propio en C++20 para un sandbox 4X de simulación galáctica persistente: la galaxia existe, cambia y
 produce consecuencias aunque el jugador no la esté mirando.
 
-**Estado: M3.1 (Consecuencias).** El primer vertical slice está completo. Hay un juego en
+**Estado: M3.2 (Patrullas de la Autoridad).** El primer vertical slice está completo. Hay un juego en
 tiempo real (×1, ×3, ×10):
 
 - un sistema estelar generado con órbitas keplerianas;
@@ -27,6 +27,9 @@ Todo tiene consecuencias. La Autoridad del sistema cobra impuestos y reparacione
 piratas, y los comerciantes pagan salarios y pueden quebrar. Tu reputación cae si los comerciantes te
 identifican atacándolos (con el transpondedor apagado y a distancia pueden no saberlo), y puedes abordar
 naves sin energía para llevarte su carga.
+
+La Autoridad convierte lo que recauda en patrullas. Acuden a las llamadas de socorro de los cargueros,
+persiguen piratas y van a por ti si eres hostil. Con ellas se pierden un 41 % menos de cargueros.
 
 Por debajo están el kernel de M1 (entidades, eventos, comandos, save/load, replay, LOD por frecuencia) y la
 fase 0. El diseño es provisional
@@ -95,6 +98,7 @@ con `gx_game.exe --seed 1 --fly-to 1 --prerun-hours 0.0745 --engage-nearest --zo
 ./build/release/bin/gx_headless.exe --sandbox --minutes 180 --seed 7
 ./build/release/bin/gx_headless.exe --sandbox --minutes 20 --seed 1 --fly-to 1 --journal
 ./build/release/bin/gx_headless.exe --sandbox --minutes 600 --pirates 0 --markets   # economía por puerto
+./build/release/bin/gx_headless.exe --sandbox --minutes 600 --patrols 0 --dump      # sin patrullas; estado final
 
 ./build/release/bin/gx_headless.exe --help
 ```
@@ -121,5 +125,5 @@ cmake/ scripts/ tools/
   combate, economía, NPC, controles).
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md): capas, tiempo, pipeline, presentación, threading,
   entidades, eventos, comandos, persistencia, determinismo, LOD, referencias, contradicciones y riesgos.
-- [docs/DECISIONS.md](docs/DECISIONS.md): registro de decisiones (ADR-001 a ADR-029).
+- [docs/DECISIONS.md](docs/DECISIONS.md): registro de decisiones (ADR-001 a ADR-030).
 - [docs/BENCHMARKS.md](docs/BENCHMARKS.md): método y resultados medidos por hito.

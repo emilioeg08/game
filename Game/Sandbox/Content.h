@@ -17,12 +17,24 @@ namespace gx::content {
 // Calendar year at SimTime::epoch() for display.
 inline constexpr i64 kEpochYear = 2400;
 
-enum Faction : u32 { kFactionPlayer = 0, kFactionIndependent = 1, kFactionPirates = 2, kFactionCount };
+enum Faction : u32 {
+    kFactionPlayer = 0,
+    kFactionIndependent = 1,
+    kFactionPirates = 2,
+    kFactionAuthority = 3,
+    kFactionCount
+};
 
 inline constexpr std::array<const char*, kFactionCount> kFactionNames = {
-    "Jugador", "Transportistas independientes", "Piratas"};
+    "Jugador", "Transportistas independientes", "Piratas", "Autoridad"};
 
-enum ShipClass : u32 { kShipClassCourier = 0, kShipClassHauler = 1, kShipClassRaider = 2, kShipClassCount };
+enum ShipClass : u32 {
+    kShipClassCourier = 0,
+    kShipClassHauler = 1,
+    kShipClassRaider = 2,
+    kShipClassPatrol = 3,
+    kShipClassCount
+};
 
 struct ShipClassDef {
     const char* name;
@@ -35,9 +47,10 @@ struct ShipClassDef {
 
 // Real-time scale (x1 = real time, ADR-021): a trip between planets takes minutes at x1, seconds at x10.
 inline constexpr std::array<ShipClassDef, kShipClassCount> kShipClasses = {{
-    {"Correo", 50'000.0, 15'000'000.0, 1.5e9, 5.0, 40.0},    // 1 AU in hyperspace: ~100 s
-    {"Carguero", 15'000.0, 6'000'000.0, 6.0e8, 12.0, 120.0}, // 1 AU in hyperspace: ~250 s
-    {"Corsario", 40'000.0, 12'000'000.0, 1.2e9, 6.0, 60.0},  // hunts haulers where they drop out
+    {"Correo", 50'000.0, 15'000'000.0, 1.5e9, 5.0, 40.0},     // 1 AU in hyperspace: ~100 s
+    {"Carguero", 15'000.0, 6'000'000.0, 6.0e8, 12.0, 120.0},  // 1 AU in hyperspace: ~250 s
+    {"Corsario", 40'000.0, 12'000'000.0, 1.2e9, 6.0, 60.0},   // hunts haulers where they drop out
+    {"Patrullero", 45'000.0, 14'000'000.0, 1.4e9, 5.0, 70.0}, // the Authority's: faster than a raider
 }};
 
 // Sensors and signatures (ADR-023). Emission units are arbitrary; ranges follow from the SNR formulas:
@@ -56,6 +69,7 @@ inline constexpr std::array<SensorDef, kShipClassCount> kShipSensors = {{
     {1e3, 1e6, 1e3, 1e12, 6.25e34}, // Correo: small, quiet, good sensors and a radar
     {5e3, 2e6, 1e4, 5e11, 0.0},     // Carguero: bigger and louder, basic passive sensors only
     {2e3, 1.5e6, 3e3, 1e12, 3e34},  // Corsario: quiet while it waits; its radar is for the kill
+    {3e3, 1.5e6, 5e3, 2e12, 5e34},  // Patrullero: overt (radar on), the best sensors in the system
 }};
 
 // Weapons (ADR-025). Beams: damage per second while the aim error stays within the hull. Railguns: damage
@@ -115,12 +129,26 @@ inline constexpr std::array<ModuleDef, 9> kRaiderModules = {{
     {ModuleType::Quarters, 80.0},
 }};
 
+inline constexpr std::array<ModuleDef, 9> kPatrolModules = {{
+    {ModuleType::Structure, 600.0},
+    {ModuleType::Reactor, 150.0},
+    {ModuleType::Drive, 180.0},
+    {ModuleType::HyperDrive, 140.0},
+    {ModuleType::Sensors, 120.0},
+    {ModuleType::Weapon, 90.0, kWeaponLaser},
+    {ModuleType::Weapon, 90.0, kWeaponLaser},
+    {ModuleType::Weapon, 90.0, kWeaponRailgun},
+    {ModuleType::Quarters, 100.0},
+}};
+
 inline std::span<const ModuleDef> shipModules(u32 shipClass) {
     switch (shipClass) {
     case kShipClassCourier:
         return kCourierModules;
     case kShipClassHauler:
         return kHaulerModules;
+    case kShipClassPatrol:
+        return kPatrolModules;
     default:
         return kRaiderModules;
     }
@@ -151,7 +179,7 @@ inline std::vector<GoodDef> goodTable() {
             {"Combustible", 50.0}, {"Metales", 120.0},  {"Maquinaria", 300.0}};
 }
 
-inline constexpr std::array<u32, kShipClassCount> kCargoCapacity = {20, 100, 30}; // tonnes
+inline constexpr std::array<u32, kShipClassCount> kCargoCapacity = {20, 100, 30, 0}; // tonnes
 inline constexpr i64 kPlayerStartCredits = 2'000;
 inline constexpr i64 kHaulerStartCredits = 3'000;
 inline constexpr f64 kMarketStockHours = 4.0; // target stock: four hours of the larger of output and use
@@ -185,6 +213,25 @@ inline constexpr f64 kMaxReputation = 100.0;
 inline constexpr f64 kBoardingRange = 5'000.0; // m
 inline constexpr f64 kBoardingSpeed = 200.0;   // m/s, relative
 inline constexpr f64 kOffenseMemory = 60.0;    // s: repeated hits on one ship count as one offence
+
+// --- Authority patrols (ADR-030) ---------------------------------------------------------------------------
+// The treasury buys and keeps patrol ships, by explicit budget rules: commission one when the price plus
+// kPatrolReserveHours of upkeep for the enlarged fleet is in the bank; decommission when the money runs out.
+inline constexpr i64 kPatrolCommissionCost = 6'000;
+inline constexpr i64 kPatrolUpkeepPerMinute = 25; // 1,500 cr/h per patrol
+inline constexpr f64 kPatrolReserveHours = 4.0;
+inline constexpr f64 kPatrolEngageRange = 1e9;     // m: suspects nearer than this are chased
+inline constexpr f64 kPatrolGiveUpRange = 2e9;     // m
+inline constexpr f64 kPatrolStandoff = 150e3;      // m
+inline constexpr f64 kPatrolBeatWellFactor = 1.05; // they watch the edge of a planet's well, like raiders do
+inline constexpr f64 kPatrolRetreatStructure = 0.5;
+inline constexpr f64 kPatrolRepairedStructure = 0.95;
+inline constexpr f64 kPirateWaryRange = 3e8;             // m: raiders break off when a patrol is this close
+inline constexpr f64 kDistressLifetime = 180.0;          // s: a call for help is answered for this long
+inline constexpr f64 kDistressMerge = 1e8;               // m: calls this close together are the same incident
+inline constexpr f64 kReputationAttackAuthority = -15.0; // identified attacking a patrol
+inline constexpr f64 kReputationKillAuthority = -40.0;
+inline constexpr f64 kReputationAfterDeath = -20.0; // a destroyed hostile player has paid: no longer wanted
 
 enum class PortRole : u8 { Planet, Refinery, Factory, Industry };
 
@@ -246,5 +293,8 @@ inline constexpr std::array<const char*, 16> kHaulerNames = {
 
 inline constexpr std::array<const char*, 8> kRaiderNames = {"Colmillo", "Garfio", "Sombra",  "Espina",
                                                             "Tábano",   "Cuervo", "Carroña", "Zarpa"};
+
+inline constexpr std::array<const char*, 6> kPatrolNames = {"Custodia", "Égida",       "Centinela",
+                                                            "Baluarte", "Salvaguarda", "Templanza"};
 
 } // namespace gx::content

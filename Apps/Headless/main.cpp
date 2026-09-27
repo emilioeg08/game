@@ -21,6 +21,7 @@
 #include "Space/Bodies/CelestialBody.h"
 
 #include <algorithm>
+#include <array>
 #include <charconv>
 #include <chrono>
 #include <cstdio>
@@ -57,9 +58,11 @@ struct Options {
     u32 minutes = 60;
     u32 haulers = 12;
     u32 pirates = 3;
+    u32 patrols = 3;
     i32 flyTo = -1;       // order the player's ship to this port at the start
     bool journal = false; // print the game journal at the end
     bool markets = false; // print every port's market at the end
+    bool dump = false;    // print every hauler and patrol at the end
 };
 
 void printUsage() {
@@ -82,9 +85,11 @@ void printUsage() {
                 "  --no-profile        disable profiling zones\n"
                 "  --sandbox           run the playable star system instead (with --seed, --minutes,\n"
                 "                      --haulers, --pirates): combat and traffic statistics\n"
+                "  --patrols <n>       sandbox: most patrols the Authority may keep (default 3)\n"
                 "  --fly-to <i>        sandbox: send the player's ship to port i at the start\n"
                 "  --journal           sandbox: print the game journal at the end\n"
                 "  --markets           sandbox: print every port's market at the end\n"
+                "  --dump              sandbox: print every hauler and patrol at the end\n"
                 "  --log-level <lvl>   trace|debug|info|warn|error (default info)\n");
 }
 
@@ -145,12 +150,16 @@ int parseOptions(int argc, char** argv, Options& options) {
             ok = parseNumber(value(), options.haulers);
         } else if (arg == "--pirates") {
             ok = parseNumber(value(), options.pirates);
+        } else if (arg == "--patrols") {
+            ok = parseNumber(value(), options.patrols);
         } else if (arg == "--fly-to") {
             ok = parseNumber(value(), options.flyTo) && options.flyTo >= 0;
         } else if (arg == "--journal") {
             options.journal = true;
         } else if (arg == "--markets") {
             options.markets = true;
+        } else if (arg == "--dump") {
+            options.dump = true;
         } else if (arg == "--no-profile") {
             options.profile = false;
         } else if (arg == "--log-level") {
@@ -342,6 +351,16 @@ void printEconomy(const Simulation& simulation, const Sandbox& sandbox, bool per
         static_cast<long long>(stats.repairFees), static_cast<long long>(stats.bountiesPaid),
         static_cast<long long>(stats.wagesPaid), static_cast<unsigned long long>(stats.bankruptcies),
         static_cast<unsigned long long>(stats.boardings));
+    std::printf(
+        "patrols: %zu in service | %llu commissioned, %llu decommissioned, %llu lost | %llu pirates killed "
+        "| %llu distress calls, %llu answered | upkeep %lld\n",
+        world.components<PatrolBrain>().size(), static_cast<unsigned long long>(stats.patrolsCommissioned),
+        static_cast<unsigned long long>(stats.patrolsDecommissioned),
+        static_cast<unsigned long long>(stats.patrolsLost),
+        static_cast<unsigned long long>(stats.piratesKilledByPatrols),
+        static_cast<unsigned long long>(stats.distressCalls),
+        static_cast<unsigned long long>(stats.distressAnswered),
+        static_cast<long long>(stats.patrolUpkeepPaid));
     if (!perPort) {
         return;
     }
@@ -367,10 +386,26 @@ int runSandbox(const Options& options) {
     config.seed = options.seed;
     config.haulers = options.haulers;
     config.pirates = options.pirates;
+    config.maxPatrols = options.patrols;
     Sandbox sandbox(config);
     Simulation simulation(Simulation::Config{.seed = config.seed}, jobs);
     sandbox.install(simulation);
     sandbox.populate(simulation);
+    // Who hits and who destroys whom, by faction (observation only: not part of the simulation state).
+    constexpr u32 kFactions = content::kFactionCount;
+    std::array<std::array<u64, kFactions + 1>, kFactions + 1> hits{};
+    std::array<std::array<u64, kFactions + 1>, kFactions + 1> kills{};
+    const auto factionOf = [&](const World& world, EntityId ship) -> u32 {
+        const ShipIdentity* identity =
+            world.isAlive(ship) ? world.components<ShipIdentity>().tryGet(ship) : nullptr;
+        return identity != nullptr ? identity->faction : kFactions; // kFactions: unknown (shooter gone)
+    };
+    simulation.events().channel<ShipDamaged>().subscribe([&](const ShipDamaged& e, const TickContext& c) {
+        ++hits[factionOf(c.world, e.attacker)][factionOf(c.world, e.ship)];
+    });
+    simulation.events().channel<ShipDestroyed>().subscribe([&](const ShipDestroyed& e, const TickContext& c) {
+        ++kills[factionOf(c.world, e.attacker)][factionOf(c.world, e.ship)];
+    });
     GX_LOG_INFO(kChannel, "sandbox | system {} | seed {} | {} haulers, {} pirates | {} minutes",
                 sandbox.systemName(), config.seed, config.haulers, config.pirates, options.minutes);
     if (options.flyTo >= 0 && static_cast<usize>(options.flyTo) < sandbox.ports().size()) {
@@ -435,6 +470,55 @@ int runSandbox(const Options& options) {
         }
     }
     printEconomy(simulation, sandbox, options.markets);
+    if (options.dump) {
+        const World& dumped = simulation.world();
+        const auto nameOf = [&](EntityId entity) -> std::string {
+            if (const CelestialBody* body = dumped.components<CelestialBody>().tryGet(entity)) {
+                return body->name;
+            }
+            if (const ShipIdentity* ship = dumped.components<ShipIdentity>().tryGet(entity)) {
+                return ship->name;
+            }
+            return "-";
+        };
+        const auto describe = [&](EntityId ship, const char* state) {
+            const ShipControl& control = dumped.components<ShipControl>().get(ship);
+            const ShipModules& modules = dumped.components<ShipModules>().get(ship);
+            const Wallet* wallet = dumped.components<Wallet>().tryGet(ship);
+            const CargoHold& hold = dumped.components<CargoHold>().get(ship);
+            std::printf("  %-14s %-10s %-8s %-10s arrived %d target %-22s speed %8.1f km/s structure %3.0f%% "
+                        "power %d "
+                        "credits %7lld cargo %3u t\n",
+                        nameOf(ship).c_str(), state, toString(control.mode), toString(control.phase),
+                        control.arrived ? 1 : 0, nameOf(control.target).c_str(),
+                        length(dumped.components<Kinematics>().get(ship).velocity) / 1e3,
+                        structureOf(modules)->fraction() * 100.0, hasPower(modules) ? 1 : 0,
+                        static_cast<long long>(wallet != nullptr ? wallet->credits : 0), hold.used());
+        };
+        const ComponentStore<HaulerBrain>& haulerBrains = dumped.components<HaulerBrain>();
+        for (usize i = 0; i < haulerBrains.size(); ++i) {
+            const HaulerBrain& brain = haulerBrains.values()[i];
+            const f64 wait = (brain.departAt - simulation.now()).toSeconds();
+            describe(haulerBrains.entities()[i],
+                     wait > 0.0 ? std::format("wait {:.0f}s", wait).c_str() : "ready");
+        }
+        const ComponentStore<PatrolBrain>& patrolBrains = dumped.components<PatrolBrain>();
+        for (usize i = 0; i < patrolBrains.size(); ++i) {
+            describe(patrolBrains.entities()[i], toString(patrolBrains.values()[i].state));
+        }
+    }
+    std::printf("combat (attacker -> victim: hits / kills):\n");
+    for (u32 a = 0; a <= kFactions; ++a) {
+        for (u32 v = 0; v <= kFactions; ++v) {
+            if (hits[a][v] > 0 || kills[a][v] > 0) {
+                std::printf("  %-30s -> %-30s %8llu / %llu\n",
+                            a < kFactions ? content::kFactionNames[a] : "?",
+                            v < kFactions ? content::kFactionNames[v] : "?",
+                            static_cast<unsigned long long>(hits[a][v]),
+                            static_cast<unsigned long long>(kills[a][v]));
+            }
+        }
+    }
     if (options.journal) {
         for (const JournalEntry& entry : sandbox.journal()) {
             std::printf("  %s  %s\n", formatSimTime(entry.time, content::kEpochYear).c_str(),

@@ -719,3 +719,104 @@ GX_TEST(Sandbox, BoardingTakesCargoAndCostsReputation) {
     GX_EXPECT_EQ(world.components<CargoHold>().get(player).amount(content::kGoodWater), 20u);
     GX_EXPECT_EQ(session.sandbox.stats().boardings, 2u);
 }
+
+GX_TEST(Sandbox, TheAuthorityBuysPatrolsItCanAfford) {
+    SandboxConfig config;
+    config.haulers = 0; // no trade, no taxes: the treasury only drains
+    config.pirates = 0;
+    Session session(0, config);
+    session.sandbox.populate(session.simulation);
+    const World& world = session.simulation.world();
+    session.simulation.runFor(SimDuration::minutes(3)); // first budget review at 2 min
+    GX_EXPECT_EQ(world.components<PatrolBrain>().size(), 1u);
+    GX_EXPECT_EQ(session.sandbox.treasury(), content::kStartingTreasury - content::kPatrolCommissionCost);
+    GX_EXPECT(session.journalContains("pone en servicio"));
+    const EntityId patrol = world.components<PatrolBrain>().entities()[0];
+    GX_EXPECT_EQ(world.components<ShipIdentity>().get(patrol).faction,
+                 static_cast<u32>(content::kFactionAuthority));
+    GX_EXPECT(world.components<SensorSuite>().get(patrol).activeOn); // overt
+
+    // 14,000 cr cannot buy a second patrol plus its reserve; upkeep drains the rest in ~9.3 h.
+    session.simulation.runFor(SimDuration::hours(10));
+    GX_EXPECT_EQ(session.sandbox.stats().patrolsCommissioned, 1u);
+    GX_EXPECT_EQ(session.sandbox.stats().patrolsDecommissioned, 1u);
+    GX_EXPECT_EQ(world.components<PatrolBrain>().size(), 0u);
+    GX_EXPECT(session.journalContains("falta de fondos"));
+}
+
+GX_TEST(Sandbox, PatrolsDestroyRaiders) {
+    SandboxConfig config;
+    config.haulers = 0;
+    config.pirates = 1;
+    Session session(0, config);
+    session.sandbox.populate(session.simulation);
+    World& world = session.simulation.world();
+    session.simulation.runFor(SimDuration::minutes(3));
+    GX_REQUIRE(world.components<PatrolBrain>().size() == 1u);
+    const EntityId patrol = world.components<PatrolBrain>().entities()[0];
+    const EntityId pirate = world.components<PirateBrain>().entities()[0];
+    const Vec3d spot{0.0, 0.0, 5e10};
+    world.components<Kinematics>().get(patrol) = {spot, {}, {}};
+    world.components<ShipControl>().get(patrol) = {};
+    world.components<Kinematics>().get(pirate) = {spot + Vec3d{150'000.0, 0.0, 0.0}, {}, {}};
+    world.components<ShipControl>().get(pirate).point = spot + Vec3d{150'000.0, 0.0, 0.0};
+    world.components<ShipModules>().get(pirate).modules[0].health = 5.0;
+    session.simulation.runFor(SimDuration::seconds(30));
+    GX_EXPECT(!world.isAlive(pirate));
+    GX_EXPECT_EQ(session.sandbox.stats().piratesKilledByPatrols, 1u);
+    GX_EXPECT_EQ(session.sandbox.stats().bountiesPaid, 0); // bounties are for the player
+}
+
+GX_TEST(Sandbox, PatrolsHuntAHostilePlayer) {
+    Session session(0, peaceful());
+    session.sandbox.populate(session.simulation);
+    World& world = session.simulation.world();
+    const EntityId player = session.sandbox.playerShip();
+    session.simulation.runFor(SimDuration::minutes(3)); // a patrol is in service
+    GX_REQUIRE(world.components<PatrolBrain>().size() == 1u);
+    parkHaulerNextToPlayer(session, 0, true, 0);
+    parkHaulerNextToPlayer(session, 1, true, 0);
+    session.simulation.runFor(SimDuration::milliseconds(1'100));
+    for (usize i = 0; i < 2; ++i) {
+        session.simulation.submitCommand(
+            BoardCommand{player, trackOf(session, world.components<HaulerBrain>().entities()[i])});
+        session.simulation.runFor(SimDuration::milliseconds(100));
+    }
+    GX_REQUIRE(session.sandbox.hostile());
+    // Bring the patrol within sight: it identifies the player (transponder on) and goes after it.
+    const EntityId patrol = world.components<PatrolBrain>().entities()[0];
+    const Kinematics& mine = world.components<Kinematics>().get(player);
+    world.components<Kinematics>().get(patrol) = {
+        mine.position + Vec3d{300'000.0, 0.0, 0.0}, mine.velocity, {}};
+    world.components<ShipControl>().get(patrol) = {};
+    session.simulation.runFor(SimDuration::seconds(5));
+    GX_EXPECT(world.components<PatrolBrain>().get(patrol).state == PatrolState::Engaging);
+    GX_EXPECT(world.components<CombatControl>().get(patrol).targetTrack != 0);
+    GX_EXPECT_EQ(session.sandbox.stats().wantedChases, 1u);
+    GX_EXPECT(session.journalContains("te busca"));
+
+    // Caught: the player's ship is destroyed, and with it the debt (no spawn-camping at the station).
+    world.components<ShipModules>().get(player).modules[0].health = 5.0;
+    session.simulation.runFor(SimDuration::seconds(30));
+    GX_EXPECT(!world.isAlive(player));
+    GX_EXPECT(!session.sandbox.hostile());
+    GX_EXPECT_NEAR(session.sandbox.reputation(), content::kReputationAfterDeath, 0.5);
+    GX_EXPECT(session.journalContains("saldada"));
+}
+
+GX_TEST(Sandbox, PatrolsAnsweringDistressCallsSaveTraders) {
+    // Causality: the treasury's patrols answer the traders' calls for help, and fewer traders die.
+    const auto lost = [](u32 patrols) {
+        SandboxConfig config;
+        config.maxPatrols = patrols;
+        Session session(3, config);
+        session.sandbox.populate(session.simulation);
+        session.simulation.runFor(SimDuration::hours(8));
+        GX_EXPECT(session.sandbox.stats().distressCalls > 0);
+        GX_EXPECT(patrols == 0 || session.sandbox.stats().distressAnswered > 0);
+        return session.sandbox.stats().haulersLost;
+    };
+    const u64 unprotected = lost(0);
+    const u64 protectedByPatrols = lost(3);
+    GX_EXPECT(protectedByPatrols < unprotected);
+}

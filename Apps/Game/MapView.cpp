@@ -428,6 +428,7 @@ void MapView::drawContacts(ImDrawList& drawList, const SystemSnapshot& snapshot,
             color = IM_COL32(235, 200, 120, alpha);
         } else if (contact.level == ContactLevel::Identified) {
             color = contact.faction == content::kFactionIndependent ? IM_COL32(120, 170, 255, alpha)
+                    : contact.faction == content::kFactionAuthority ? IM_COL32(210, 235, 255, alpha)
                                                                     : IM_COL32(255, 110, 100, alpha);
         }
         const f64 sigmaPixels = contact.uncertainty / mpp;

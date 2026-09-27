@@ -255,3 +255,27 @@ Flujos de dinero (`gx_headless --sandbox --minutes 600`, Release, semilla 2400, 
 
 El coste de simulación no cambia de forma apreciable: los salarios son un sistema por minuto, y los
 impuestos y las reparaciones van dentro de operaciones que ya existían.
+
+## M3.2 — Patrullas (2026-09-27)
+
+`gx_headless --sandbox --minutes 600`, Release, 12 cargueros y 3 piratas; hasta 3 patrullas:
+
+| Semilla | Perdidos sin patrullas | Perdidos con patrullas | Piratas abatidos por patrullas | Socorros atendidos |
+|---|---|---|---|---|
+| 2400 | 16 | 8 | 8 | 12 de 25 |
+| 7 | 21 | 7 | 6 | 18 de 38 |
+| 99 | 9 | 8 | 0 | 8 de 22 |
+| 12345 | 10 | 10 | 6 | 19 de 31 |
+| **Total** | **56** | **33 (−41 %)** | 20 | |
+
+**Variabilidad entre trayectorias** (misma semilla 2400, el jugador vuela a puertos distintos):
+
+| Patrullas | Entregas | Cargueros perdidos |
+|---|---|---|
+| 0 | 11.220–13.301 t | 13–25 |
+| 3 | 9.793–14.449 t | 8–16 |
+
+Es una advertencia de método: una sola ejecución no separa efectos de ±20 %.
+
+Coste: las patrullas añaden una facción observadora con 3 naves a los sensores. `Game.Patrols` y
+`Game.Authority` no aparecen entre las zonas relevantes.

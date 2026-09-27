@@ -23,6 +23,9 @@ constexpr u64 kRespawnStream = fnv1a64("sandbox.respawn");
 constexpr u64 kRouteStream = fnv1a64("sandbox.hauler.route");
 constexpr u64 kDwellStream = fnv1a64("sandbox.hauler.dwell");
 constexpr u64 kAmbushStream = fnv1a64("sandbox.pirate.ambush");
+constexpr u64 kPatrolStream = fnv1a64("sandbox.patrol.commission");
+constexpr u64 kBeatStream = fnv1a64("sandbox.patrol.beat");
+constexpr SimDuration kPatrolChaseTimeout = SimDuration::minutes(5);
 constexpr SimDuration kAmbushTime = SimDuration::minutes(4); // raiders move to another ambush point
 constexpr SimDuration kHitJournalGap = SimDuration::seconds(10);
 constexpr f64 kAmbushWellFactor = 1.1; // raiders wait just outside a planet's gravity well
@@ -80,6 +83,20 @@ const char* toString(PirateState state) {
     return "?";
 }
 
+const char* toString(PatrolState state) {
+    switch (state) {
+    case PatrolState::Patrolling:
+        return "Patrolling";
+    case PatrolState::Engaging:
+        return "Engaging";
+    case PatrolState::Returning:
+        return "Returning";
+    case PatrolState::Count:
+        break;
+    }
+    return "?";
+}
+
 Sandbox::Sandbox(const SandboxConfig& config) : m_config(config) {}
 
 bool Sandbox::tactical() const {
@@ -96,6 +113,7 @@ void Sandbox::install(Simulation& simulation) {
     World& world = simulation.world();
     world.registerComponent<HaulerBrain>("Game.HaulerBrain");
     world.registerComponent<PirateBrain>("Game.PirateBrain");
+    world.registerComponent<PatrolBrain>("Game.PatrolBrain");
 
     EventBus& events = simulation.events();
     events.channel<ShipArrived>().subscribe(
@@ -143,6 +161,11 @@ void Sandbox::install(Simulation& simulation) {
                           SimDuration::seconds(1),
                           {},
                           [this](const TickContext& context) { updatePirates(context); }});
+    simulation.addSystem({"Game.Patrols",
+                          TickPhase::Simulation,
+                          SimDuration::seconds(1),
+                          {},
+                          [this](const TickContext& context) { updatePatrols(context); }});
     simulation.addSystem({"Game.Payroll",
                           TickPhase::Simulation,
                           SimDuration::minutes(1),
@@ -161,6 +184,12 @@ void Sandbox::install(Simulation& simulation) {
                           SimDuration::seconds(1),
                           {},
                           [this](const TickContext& context) { updateUpkeep(context); }});
+    // The Authority's budget: pays its patrols, commissions or decommissions them (structural changes).
+    simulation.addSystem({"Game.Authority",
+                          TickPhase::EventResolution,
+                          m_config.authorityReview,
+                          {},
+                          [this](const TickContext& context) { updateAuthority(context); }});
 
     simulation.addStateBlock(
         "Game.Sandbox", [this](BinaryWriter& writer) { writeState(writer); },
@@ -666,6 +695,16 @@ void Sandbox::updatePirates(const TickContext& context) {
         return contact.position + contact.velocity * (now - contact.lastSeen).toSeconds();
     };
     const FactionPicture& picture = m_sensors.picture(content::kFactionPirates);
+    const auto isPatrol = [](const SensorContact& contact) {
+        return (contact.level == ContactLevel::Identified && contact.faction == content::kFactionAuthority) ||
+               (contact.level >= ContactLevel::Classified && contact.shipClass == content::kShipClassPatrol);
+    };
+    const auto patrolNear = [&](const Vec3d& position) {
+        return std::any_of(
+            picture.contacts.begin(), picture.contacts.end(), [&](const SensorContact& contact) {
+                return isPatrol(contact) && length(estimate(contact) - position) < content::kPirateWaryRange;
+            });
+    };
 
     for (usize i = 0; i < brains.size(); ++i) {
         const EntityId ship = brains.entities()[i];
@@ -714,6 +753,7 @@ void Sandbox::updatePirates(const TickContext& context) {
                 keep = false;
                 brain.ignoreTrack = control.track; // too long for nothing: not this one again
             }
+            keep = keep && !patrolNear(position); // not with the Authority watching
             if (!keep) {
                 brain.state = PirateState::Lurking;
                 brain.nextMove = now; // find another ambush point
@@ -729,7 +769,7 @@ void Sandbox::updatePirates(const TickContext& context) {
             const SensorContact* best = nullptr;
             f64 bestDistance = content::kPirateHuntRange;
             for (const SensorContact& contact : picture.contacts) {
-                if (contact.level == ContactLevel::Unknown ||
+                if (contact.level == ContactLevel::Unknown || isPatrol(contact) ||
                     contact.shipClass == content::kShipClassRaider || contact.trackId == brain.ignoreTrack ||
                     (contact.level == ContactLevel::Identified &&
                      contact.faction == content::kFactionPirates) ||
@@ -742,6 +782,13 @@ void Sandbox::updatePirates(const TickContext& context) {
                     best = &contact;
                     bestDistance = distance;
                 }
+            }
+            if (patrolNear(position) && best == nullptr && now < brain.nextMove) {
+                brain.nextMove = now; // a patrol on this beat: move to another ambush
+            }
+            if (best != nullptr && patrolNear(position)) {
+                best = nullptr; // no hunting under the Authority's nose
+                brain.nextMove = now;
             }
             if (best != nullptr) {
                 brain.state = PirateState::Hunting;
@@ -867,7 +914,8 @@ void Sandbox::updateUpkeep(const TickContext& context) {
                 m_stats.cargoLost[item.good] += item.tonnes; // leaves the system with the ship
             }
         }
-        addJournal(now, std::format("Noticias: {} quiebra y abandona el sistema.", nameOf(world, ship)));
+        addJournal(now, std::format("Noticias: {} quiebra y abandona el sistema.", nameOf(world, ship)),
+                   JournalKind::News);
         world.destroyEntity(ship);
         ++m_stats.bankruptcies;
         m_nextHaulerSpawn = std::max(m_nextHaulerSpawn, now + m_config.haulerRespawnDelay);
@@ -877,6 +925,9 @@ void Sandbox::updateUpkeep(const TickContext& context) {
     if (m_reputation < 0.0) {
         m_reputation = std::min(0.0, m_reputation + content::kReputationRecoveryPerMinute * dt / 60.0);
     }
+    std::erase_if(m_distress, [&](const DistressCall& call) {
+        return (now - call.time).toSeconds() > content::kDistressLifetime;
+    });
     std::erase_if(m_offenses, [&](const Offense& offense) {
         return (now - offense.time).toSeconds() > content::kOffenseMemory;
     });
@@ -916,7 +967,8 @@ void Sandbox::onShipArrived(const ShipArrived& event, const TickContext& context
         brain->departAt =
             context.now + m_config.minDwell + SimDuration::milliseconds(rng.uniformU32(dwellSpanMs + 1));
         addJournal(context.now,
-                   std::format("{} atraca en {}.", nameOf(world, event.ship), nameOf(world, event.target)));
+                   std::format("{} atraca en {}.", nameOf(world, event.ship), nameOf(world, event.target)),
+                   JournalKind::Traffic);
     } else if (event.ship == m_player) {
         addJournal(context.now, event.target.isValid()
                                     ? std::format("{} ha llegado a {}.", nameOf(world, event.ship),
@@ -958,13 +1010,26 @@ void Sandbox::onHyperspaceTransition(const HyperspaceTransition& event, const Ti
 void Sandbox::onShipDamaged(const ShipDamaged& event, const TickContext& context) {
     World& world = context.world;
     const ShipIdentity* victim = world.components<ShipIdentity>().tryGet(event.ship);
+    if (victim != nullptr && victim->faction == content::kFactionIndependent) {
+        // A trader under fire knows where it is: it calls for help (one call per incident).
+        const Vec3d where = world.components<Kinematics>().get(event.ship).position;
+        const bool known = std::any_of(m_distress.begin(), m_distress.end(), [&](const DistressCall& call) {
+            return lengthSquared(call.position - where) < content::kDistressMerge * content::kDistressMerge;
+        });
+        if (!known) {
+            m_distress.push_back({where, context.now});
+            ++m_stats.distressCalls;
+        }
+    }
     if (event.attacker.isValid() && event.attacker == m_player && victim != nullptr &&
-        victim->faction == content::kFactionIndependent &&
+        (victim->faction == content::kFactionIndependent || victim->faction == content::kFactionAuthority) &&
         std::none_of(m_offenses.begin(), m_offenses.end(),
                      [&](const Offense& offense) { return offense.victim == event.ship; })) {
         m_offenses.push_back({event.ship, context.now});
-        if (witnessedByTraders(m_player)) {
-            changeReputation(content::kReputationHit);
+        if (witnessedBy(victim->faction, m_player)) { // the victim's own network is the witness
+            changeReputation(victim->faction == content::kFactionAuthority
+                                 ? content::kReputationAttackAuthority
+                                 : content::kReputationHit);
             addJournal(context.now,
                        std::format("Los comerciantes te identifican atacando a {}: reputación {:.0f}.",
                                    victim->name, m_reputation));
@@ -1030,6 +1095,10 @@ void Sandbox::onShipDestroyed(const ShipDestroyed& event, const TickContext& con
         addJournal(now, event.reactorBreach ? "¡Brecha en el reactor! Tu nave ha sido destruida."
                                             : "Tu nave ha sido destruida.");
         ++m_stats.playerDeaths;
+        if (hostile()) {
+            m_reputation = content::kReputationAfterDeath; // justice is done: no longer wanted
+            addJournal(now, "Tu cuenta con la Autoridad queda saldada: ya no te buscan.");
+        }
         m_player = {};
         m_playerRespawnAt = now + m_config.playerRespawnDelay;
         return;
@@ -1040,7 +1109,14 @@ void Sandbox::onShipDestroyed(const ShipDestroyed& event, const TickContext& con
             if (victim->faction == content::kFactionPirates) {
                 changeReputation(content::kReputationPirateKill);
                 payBounty(context.world, victim->name, now);
-            } else if (victim->faction == content::kFactionIndependent && witnessedByTraders(m_player)) {
+            } else if (victim->faction == content::kFactionAuthority &&
+                       witnessedBy(content::kFactionAuthority, m_player)) {
+                changeReputation(content::kReputationKillAuthority);
+                addJournal(
+                    now, std::format("La Autoridad sabe que destruiste el patrullero {}: reputación {:.0f}.",
+                                     victim->name, m_reputation));
+            } else if (victim->faction == content::kFactionIndependent &&
+                       witnessedBy(content::kFactionIndependent, m_player)) {
                 changeReputation(content::kReputationKill);
                 addJournal(now, std::format("Los comerciantes saben que destruiste a {}: reputación {:.0f}.",
                                             victim->name, m_reputation));
@@ -1051,8 +1127,15 @@ void Sandbox::onShipDestroyed(const ShipDestroyed& event, const TickContext& con
         if (identity->faction == content::kFactionIndependent) {
             ++m_stats.haulersLost;
             m_nextHaulerSpawn = std::max(m_nextHaulerSpawn, now + m_config.haulerRespawnDelay);
+        } else if (identity->faction == content::kFactionAuthority) {
+            ++m_stats.patrolsLost;
         } else if (identity->faction == content::kFactionPirates) {
             ++m_stats.piratesLost;
+            const ShipIdentity* killer = world.isAlive(event.attacker)
+                                             ? world.components<ShipIdentity>().tryGet(event.attacker)
+                                             : nullptr;
+            m_stats.piratesKilledByPatrols +=
+                killer != nullptr && killer->faction == content::kFactionAuthority;
             m_nextPirateSpawn = std::max(m_nextPirateSpawn, now + m_config.pirateRespawnDelay);
         }
     }
@@ -1311,6 +1394,221 @@ void Sandbox::onBoardCommand(const BoardCommand& command, const TickContext& con
     world.destroyEntity(victim); // Commands phase: structural changes are allowed here
 }
 
+EntityId Sandbox::spawnPatrol(World& world, SimTime now, Rng& rng, u32 serial) {
+    const EntityId station = m_stations[rng.uniformU32(static_cast<u32>(m_stations.size()))];
+    std::string name = std::format("{}-{}", content::kPatrolNames[serial % content::kPatrolNames.size()],
+                                   10 + rng.uniformU32(90));
+    const EntityId ship = spawnShip(world, now, rng, std::move(name), content::kFactionAuthority,
+                                    content::kShipClassPatrol, station);
+    SensorSuite& suite = world.components<SensorSuite>().get(ship);
+    suite.activeOn = true; // police: overt, radar and transponder on
+    suite.transponderOn = true;
+    world.components<PatrolBrain>().add(ship, {PatrolState::Patrolling, now, 0, 0});
+    return ship;
+}
+
+void Sandbox::updateAuthority(const TickContext& context) {
+    World& world = context.world;
+    const SimTime now = context.now;
+    ComponentStore<PatrolBrain>& patrols = world.components<PatrolBrain>();
+    // Upkeep for the time since the last review.
+    const i64 upkeep = std::llround(static_cast<f64>(content::kPatrolUpkeepPerMinute) *
+                                    context.dt.toSeconds() / 60.0 * static_cast<f64>(patrols.size()));
+    m_treasury -= upkeep;
+    m_stats.patrolUpkeepPaid += upkeep;
+    if (m_treasury < 0 && patrols.size() > 0) {
+        // Out of money: a patrol is decommissioned (one docked at a station if any).
+        EntityId retired = patrols.entities().back();
+        for (const EntityId patrol : patrols.entities()) {
+            const CelestialBody* port = world.components<CelestialBody>().tryGet(dockedPort(world, patrol));
+            retired = port != nullptr && port->kind == BodyKind::Station ? patrol : retired;
+        }
+        addJournal(now,
+                   std::format("Noticias: la Autoridad da de baja el patrullero {} por falta de fondos.",
+                               nameOf(world, retired)),
+                   JournalKind::News);
+        world.destroyEntity(retired);
+        ++m_stats.patrolsDecommissioned;
+        return;
+    }
+    // A new patrol when the price and a reserve of upkeep for the larger fleet are in the bank.
+    const auto fleet = static_cast<f64>(patrols.size());
+    const f64 reserve = static_cast<f64>(content::kPatrolUpkeepPerMinute) * 60.0 *
+                        content::kPatrolReserveHours * (fleet + 1.0);
+    if (patrols.size() < m_config.maxPatrols && !m_stations.empty() &&
+        static_cast<f64>(m_treasury) >= static_cast<f64>(content::kPatrolCommissionCost) + reserve) {
+        Rng rng = Rng::forStream(m_config.seed, kPatrolStream, m_stats.patrolsCommissioned);
+        const EntityId patrol = spawnPatrol(world, now, rng, static_cast<u32>(m_stats.patrolsCommissioned));
+        m_treasury -= content::kPatrolCommissionCost;
+        ++m_stats.patrolsCommissioned;
+        addJournal(
+            now,
+            std::format("Noticias: la Autoridad pone en servicio el patrullero {}.", nameOf(world, patrol)),
+            JournalKind::News);
+    }
+}
+
+void Sandbox::updatePatrols(const TickContext& context) {
+    World& world = context.world;
+    ComponentStore<PatrolBrain>& brains = world.components<PatrolBrain>();
+    if (brains.size() == 0) {
+        return;
+    }
+    const SimTime now = context.now;
+    const FactionPicture& picture = m_sensors.picture(content::kFactionAuthority);
+    const auto estimate = [&](const SensorContact& contact) {
+        return contact.position + contact.velocity * (now - contact.lastSeen).toSeconds();
+    };
+    // Suspects: identified pirates, anything that looks like a raider, and the player when wanted.
+    const bool wanted = hostile();
+    const auto suspect = [&](const SensorContact& contact) {
+        if (contact.level == ContactLevel::Identified) {
+            return contact.faction == content::kFactionPirates ||
+                   (contact.faction == content::kFactionPlayer && wanted);
+        }
+        return contact.level == ContactLevel::Classified && contact.shipClass == content::kShipClassRaider;
+    };
+
+    for (usize i = 0; i < brains.size(); ++i) {
+        const EntityId ship = brains.entities()[i];
+        PatrolBrain& brain = brains.values()[i];
+        ShipControl& control = world.components<ShipControl>().get(ship);
+        CombatControl& orders = world.components<CombatControl>().get(ship);
+        const ShipModules& modules = world.components<ShipModules>().get(ship);
+        SensorSuite& suite = world.components<SensorSuite>().get(ship);
+        const Vec3d position = world.components<Kinematics>().get(ship).position;
+        if (!hasPower(modules)) {
+            orders.targetTrack = 0;
+            continue;
+        }
+        if (control.phase == DrivePhase::Hyperspace) {
+            continue;
+        }
+        suite.activeOn = suite.activeStrength > 0.0;
+
+        const ShipModule* structure = structureOf(modules);
+        const bool armed = moduleEfficiency(modules, ModuleType::Weapon) > 0.0;
+        const bool beaten =
+            (structure != nullptr && structure->fraction() < content::kPatrolRetreatStructure) || !armed;
+        const auto goRepair = [&] {
+            brain.state = PatrolState::Returning;
+            orders.targetTrack = 0;
+            const EntityId station = nearestStation(world, position, now);
+            resetOrders(control, FlightMode::Approach);
+            control.target = station;
+            control.standoff = standoffDistance(world, station);
+        };
+        if (brain.state != PatrolState::Returning && beaten) {
+            goRepair();
+            continue;
+        }
+        switch (brain.state) {
+        case PatrolState::Count:
+            break;
+        case PatrolState::Returning: {
+            const bool repaired =
+                (structure == nullptr || structure->fraction() >= content::kPatrolRepairedStructure) && armed;
+            const CelestialBody* target = world.components<CelestialBody>().tryGet(control.target);
+            if (repaired) {
+                brain.state = PatrolState::Patrolling;
+                brain.nextMove = now;
+            } else if (control.mode != FlightMode::Approach || target == nullptr ||
+                       target->kind != BodyKind::Station) {
+                goRepair();
+            }
+            break;
+        }
+        case PatrolState::Engaging: {
+            const SensorContact* contact = m_sensors.findContact(content::kFactionAuthority, control.track);
+            bool keep = contact != nullptr && control.mode == FlightMode::Pursue && suspect(*contact) &&
+                        length(estimate(*contact) - position) < content::kPatrolGiveUpRange &&
+                        length(contact->velocity) < content::kHyperspaceSpeedThreshold;
+            if (keep && now >= brain.nextMove) {
+                keep = false;
+                brain.ignoreTrack = control.track;
+            }
+            if (!keep) {
+                brain.state = PatrolState::Patrolling;
+                brain.nextMove = now;
+                orders.targetTrack = 0;
+                resetOrders(control, FlightMode::Stop);
+            }
+            break;
+        }
+        case PatrolState::Patrolling: {
+            const SensorContact* best = nullptr;
+            f64 bestDistance = content::kPatrolEngageRange;
+            for (const SensorContact& contact : picture.contacts) {
+                if (!suspect(contact) || contact.trackId == brain.ignoreTrack ||
+                    length(contact.velocity) >= content::kHyperspaceSpeedThreshold) {
+                    continue;
+                }
+                const f64 distance = length(estimate(contact) - position);
+                if (distance < bestDistance) {
+                    best = &contact;
+                    bestDistance = distance;
+                }
+            }
+            // A call for help this is the nearest free patrol to (and has not reached yet).
+            const DistressCall* call = nullptr;
+            f64 callDistance = 0.0;
+            for (const DistressCall& candidate : m_distress) {
+                const f64 mine = length(candidate.position - position);
+                bool nearest = best == nullptr && mine > content::kPatrolStandoff;
+                for (usize j = 0; j < brains.size() && nearest; ++j) {
+                    nearest =
+                        j == i || brains.values()[j].state != PatrolState::Patrolling ||
+                        length(candidate.position -
+                               world.components<Kinematics>().get(brains.entities()[j]).position) >= mine;
+                }
+                if (nearest && (call == nullptr || mine < callDistance)) {
+                    call = &candidate;
+                    callDistance = mine;
+                }
+            }
+            if (best != nullptr) {
+                brain.state = PatrolState::Engaging;
+                brain.nextMove = now + kPatrolChaseTimeout;
+                resetOrders(control, FlightMode::Pursue);
+                control.track = best->trackId;
+                control.standoff = content::kPatrolStandoff;
+                orders.targetTrack = best->trackId;
+                if (best->level == ContactLevel::Identified && best->faction == content::kFactionPlayer) {
+                    ++m_stats.wantedChases;
+                    addJournal(now, std::format("La Autoridad te busca: el patrullero {} va a por ti.",
+                                                nameOf(world, ship)));
+                }
+            } else if (call != nullptr &&
+                       (control.mode != FlightMode::MoveTo || control.point != call->position)) {
+                resetOrders(control, FlightMode::MoveTo);
+                control.point = call->position;
+                brain.nextMove = now + kAmbushTime; // then back to the beats
+                ++m_stats.distressAnswered;
+            } else if (now >= brain.nextMove) {
+                // Next beat: the planet where the traders reported most losses (ties broken at random).
+                Rng rng = Rng::forStream(context.worldSeed, hashCombine(kBeatStream, entityKey(ship)),
+                                         brain.decisions++);
+                EntityId beat = m_planets.front();
+                f64 bestScore = -1.0;
+                for (const EntityId planet : m_planets) {
+                    const f64 score = danger(planet, now) + rng.uniform(0.0, 0.1);
+                    if (score > bestScore) {
+                        bestScore = score;
+                        beat = planet;
+                    }
+                }
+                const CelestialBody& body = world.components<CelestialBody>().get(beat);
+                resetOrders(control, FlightMode::MoveTo);
+                control.point = pointAround(bodyStateAt(world, beat, now).position,
+                                            gravityWellRadius(body) * content::kPatrolBeatWellFactor, rng);
+                brain.nextMove = now + kAmbushTime;
+            }
+            break;
+        }
+        }
+    }
+}
+
 void Sandbox::updatePayroll(const TickContext& context) {
     // Crews are paid every minute, docked or not; a trader that cannot pay goes bankrupt at its next
     // departure.
@@ -1327,9 +1625,9 @@ bool Sandbox::hostile() const {
     return m_reputation <= content::kHostileReputation;
 }
 
-bool Sandbox::witnessedByTraders(EntityId ship) const {
-    // The traders' network knows who it has identified on its sensors (or by transponder).
-    for (const SensorContact& contact : m_sensors.picture(content::kFactionIndependent).contacts) {
+bool Sandbox::witnessedBy(u32 faction, EntityId ship) const {
+    // A faction knows who it has identified on its sensors (or by transponder).
+    for (const SensorContact& contact : m_sensors.picture(faction).contacts) {
         if (!contact.ghost && contact.target == ship && contact.level == ContactLevel::Identified) {
             return true;
         }
@@ -1381,10 +1679,14 @@ void Sandbox::updateFlightRate(const World& world, SimTime now) {
     }
 }
 
-void Sandbox::addJournal(SimTime time, std::string text) {
-    m_journal.push_back({time, std::move(text)});
+void Sandbox::addJournal(SimTime time, std::string text, JournalKind kind) {
+    m_journal.push_back({time, std::move(text), kind});
     if (m_journal.size() > kJournalCapacity) {
-        m_journal.erase(m_journal.begin());
+        // Traffic goes first: it must not push out what happened to the player.
+        const auto traffic = std::find_if(m_journal.begin(), m_journal.end(), [](const JournalEntry& entry) {
+            return entry.kind == JournalKind::Traffic;
+        });
+        m_journal.erase(traffic != m_journal.end() ? traffic : m_journal.begin());
     }
 }
 
@@ -1439,6 +1741,7 @@ void Sandbox::writeState(BinaryWriter& writer) const {
     writer.io(m_treasury);
     writer.io(m_reputation);
     writer.io(m_offenses);
+    writer.io(m_distress);
     writer.io(m_playerPrices);
     writer.io(m_traderPrices);
     writer.io(m_danger);
@@ -1459,6 +1762,7 @@ void Sandbox::readState(BinaryReader& reader) {
     reader.io(m_treasury);
     reader.io(m_reputation);
     reader.io(m_offenses);
+    reader.io(m_distress);
     reader.io(m_playerPrices);
     reader.io(m_traderPrices);
     reader.io(m_danger);
