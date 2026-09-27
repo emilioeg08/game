@@ -172,6 +172,9 @@ int GameApp::run(const Options& options) {
     if (options.select) {
         m_selected = sandbox().playerShip();
     }
+    if (options.selectPort >= 0 && static_cast<usize>(options.selectPort) < sandbox().ports().size()) {
+        m_selected = sandbox().ports()[static_cast<usize>(options.selectPort)];
+    }
     m_showTruth = options.showTruth;
 
     u32 frame = 0;
@@ -232,6 +235,7 @@ int GameApp::run(const Options& options) {
         drawShipPanel();
         drawSelectionPanel();
         drawSensorsPanel();
+        drawMarketWindow();
         drawJournal();
         if (m_showDebug) {
             drawDebugPanel();
@@ -376,6 +380,10 @@ void GameApp::submitSensors(bool activeOn, bool transponderOn) {
 
 void GameApp::submitEngage(u32 track, bool fire, bool pursue) {
     simulation().submitCommand(EngageCommand{sandbox().playerShip(), track, fire, pursue});
+}
+
+void GameApp::submitTrade(GoodId good, i32 tonnes) {
+    simulation().submitCommand(TradeCommand{sandbox().playerShip(), good, tonnes});
 }
 
 void GameApp::handleKeyboard() {
@@ -540,6 +548,18 @@ void GameApp::drawShipPanel() {
     ImGui::Text("%.*s", static_cast<int>(ship->name.size()), ship->name.data());
     ImGui::SameLine();
     ImGui::TextDisabled("(%s)", content::kShipClasses[ship->shipClass].name);
+    u32 cargoUsed = 0;
+    std::string cargo;
+    for (const CargoItem& item : m_snapshot.playerCargo) {
+        cargoUsed += item.tonnes;
+        cargo += std::format("{}{} t {}", cargo.empty() ? "" : ", ", item.tonnes,
+                             sandbox().economy().goods()[item.good].name);
+    }
+    ImGui::Text("Créditos: %lld cr   ·   Bodega: %u / %u t", static_cast<long long>(m_snapshot.playerCredits),
+                cargoUsed, m_snapshot.playerCargoCapacity);
+    if (!cargo.empty()) {
+        ImGui::TextDisabled("Carga: %s", cargo.c_str());
+    }
     ImGui::Separator();
     const f64 acceleration = length(ship->acceleration);
     ImGui::Text("Velocidad:    %s", formatSpeed(length(ship->velocity)).c_str());
@@ -653,6 +673,157 @@ void GameApp::drawCombatSection(const ShipView& ship) {
     }
 }
 
+void GameApp::drawMarketWindow() {
+    const MarketView* market = m_snapshot.findMarket(m_snapshot.dockedPort);
+    if (market == nullptr) {
+        return;
+    }
+    const ImVec2 display = ImGui::GetIO().DisplaySize;
+    ImGui::SetNextWindowPos({460.0f, display.y - 20.0f}, ImGuiCond_FirstUseEver, {0.0f, 1.0f});
+    ImGui::SetNextWindowSize({620.0f, 250.0f}, ImGuiCond_FirstUseEver);
+    const std::string title = std::format("Mercado · {}###market", nameOf(market->port));
+    ImGui::Begin(title.c_str());
+    ImGui::Text("Créditos: %lld cr", static_cast<long long>(m_snapshot.playerCredits));
+    ImGui::SameLine();
+    u32 used = 0;
+    for (const CargoItem& item : m_snapshot.playerCargo) {
+        used += item.tonnes;
+    }
+    ImGui::TextDisabled("  ·  bodega %u / %u t  ·  compras a la izquierda, ventas a la derecha", used,
+                        m_snapshot.playerCargoCapacity);
+    if (ImGui::BeginTable("market", 7, ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingStretchProp)) {
+        ImGui::TableSetupColumn("Bien");
+        ImGui::TableSetupColumn("Existencias");
+        ImGui::TableSetupColumn("Prod. / cons.");
+        ImGui::TableSetupColumn("Compra");
+        ImGui::TableSetupColumn("Venta");
+        ImGui::TableSetupColumn("Bodega");
+        ImGui::TableSetupColumn("");
+        ImGui::TableHeadersRow();
+        for (const MarketRowView& row : market->rows) {
+            ImGui::TableNextRow();
+            ImGui::PushID(static_cast<int>(row.good));
+            ImGui::TableNextColumn();
+            ImGui::TextUnformatted(row.name.data(), row.name.data() + row.name.size());
+            ImGui::TableNextColumn();
+            ImGui::Text("%.0f / %.0f t", row.stock, row.target);
+            ImGui::TableNextColumn();
+            ImGui::TextDisabled("+%.0f / -%.0f t/h", row.production, row.consumption);
+            // Prices against the good's base: cheap in green, dear in red.
+            const auto priceColor = [&](i64 price) {
+                const f64 ratio = static_cast<f64>(price) / row.basePrice;
+                return ratio < 0.8    ? color(120, 230, 140)
+                       : ratio > 1.25 ? color(255, 130, 110)
+                                      : color(220, 220, 220);
+            };
+            ImGui::TableNextColumn();
+            ImGui::TextColored(priceColor(row.buy), "%lld", static_cast<long long>(row.buy));
+            ImGui::TableNextColumn();
+            ImGui::TextColored(priceColor(row.sell), "%lld", static_cast<long long>(row.sell));
+            ImGui::TableNextColumn();
+            u32 held = 0;
+            for (const CargoItem& item : m_snapshot.playerCargo) {
+                held = item.good == row.good ? item.tonnes : held;
+            }
+            ImGui::Text("%u t", held);
+            ImGui::TableNextColumn();
+            if (ImGui::SmallButton("+1")) {
+                submitTrade(row.good, 1);
+            }
+            ImGui::SameLine();
+            if (ImGui::SmallButton("+10")) {
+                submitTrade(row.good, 10);
+            }
+            ImGui::SameLine();
+            ImGui::TextDisabled("|");
+            ImGui::SameLine();
+            if (ImGui::SmallButton("-1")) {
+                submitTrade(row.good, -1);
+            }
+            ImGui::SameLine();
+            if (ImGui::SmallButton("Todo")) {
+                submitTrade(row.good, -static_cast<i32>(std::max<u32>(held, 1)));
+            }
+            ImGui::PopID();
+        }
+        ImGui::EndTable();
+    }
+    ImGui::End();
+}
+
+void GameApp::drawKnownPrices(EntityId port) {
+    const KnownPricesView* known = m_snapshot.findKnownPrices(port);
+    if (known == nullptr || known->prices == nullptr) {
+        ImGui::TextDisabled("Sin datos de mercado: nadie te ha contado sus precios.");
+        return;
+    }
+    ImGui::TextDisabled("Precios que conoces (de hace %s)",
+                        formatDuration(SimDuration::seconds(static_cast<i64>(known->ageSeconds))).c_str());
+    if (ImGui::BeginTable("known", 4, ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingStretchProp)) {
+        ImGui::TableSetupColumn("Bien");
+        ImGui::TableSetupColumn("Compra");
+        ImGui::TableSetupColumn("Venta");
+        ImGui::TableSetupColumn("Existencias");
+        ImGui::TableHeadersRow();
+        for (const PricePoint& point : known->prices->prices) {
+            ImGui::TableNextRow();
+            ImGui::TableNextColumn();
+            ImGui::TextUnformatted(sandbox().economy().goods()[point.good].name.c_str());
+            ImGui::TableNextColumn();
+            ImGui::Text("%lld", static_cast<long long>(point.buy));
+            ImGui::TableNextColumn();
+            ImGui::Text("%lld", static_cast<long long>(point.sell));
+            ImGui::TableNextColumn();
+            ImGui::TextUnformatted(point.stockRatio < 0.3   ? "escasas"
+                                   : point.stockRatio < 0.8 ? "bajas"
+                                   : point.stockRatio < 1.5 ? "normales"
+                                                            : "abundantes");
+        }
+        ImGui::EndTable();
+    }
+}
+
+void GameApp::drawEconomyInspector() {
+    const SandboxStats& stats = sandbox().stats();
+    ImGui::Text(
+        "Comerciantes: %llu cargas, %llu t entregadas, %llu viajes de reposición, %llu de exploración",
+        static_cast<unsigned long long>(stats.haulerTrades),
+        static_cast<unsigned long long>(stats.tonnesDelivered),
+        static_cast<unsigned long long>(stats.repositionTrips),
+        static_cast<unsigned long long>(stats.explorationTrips));
+    for (const MarketView& market : m_snapshot.markets) {
+        const std::string label =
+            std::format("{} (peligro {:.2f})###eco{}", nameOf(market.port),
+                        sandbox().danger(market.port, simulation().now()), market.port.index);
+        if (!ImGui::TreeNode(label.c_str())) {
+            continue;
+        }
+        if (ImGui::BeginTable("eco", 5, ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingStretchProp)) {
+            ImGui::TableSetupColumn("Bien");
+            ImGui::TableSetupColumn("Existencias");
+            ImGui::TableSetupColumn("Precio");
+            ImGui::TableSetupColumn("Prod./cons. t/h");
+            ImGui::TableSetupColumn("Escasez");
+            ImGui::TableHeadersRow();
+            for (const MarketRowView& row : market.rows) {
+                ImGui::TableNextRow();
+                ImGui::TableNextColumn();
+                ImGui::TextUnformatted(row.name.data(), row.name.data() + row.name.size());
+                ImGui::TableNextColumn();
+                ImGui::Text("%.0f / %.0f", row.stock, row.target);
+                ImGui::TableNextColumn();
+                ImGui::Text("%lld", static_cast<long long>(row.buy));
+                ImGui::TableNextColumn();
+                ImGui::Text("+%.0f / -%.0f", row.production, row.consumption);
+                ImGui::TableNextColumn();
+                ImGui::Text("%.0f t", row.shortage);
+            }
+            ImGui::EndTable();
+        }
+        ImGui::TreePop();
+    }
+}
+
 void GameApp::drawContactSelection(const ContactView& contact) {
     if (contact.level == ContactLevel::Identified && !contact.name.empty()) {
         ImGui::Text("%.*s", static_cast<int>(contact.name.size()), contact.name.data());
@@ -721,6 +892,7 @@ void GameApp::drawSelectionPanel() {
     ImGui::SetNextWindowSize({360.0f, display.y * 0.6f}, ImGuiCond_FirstUseEver);
     ImGui::Begin("Selección");
     ImGui::Text("%s", nameOf(m_selected).c_str());
+    const bool isPort = m_snapshot.findMarket(m_selected) != nullptr;
     if (const BodyView* body = m_snapshot.findBody(m_selected)) {
         ImGui::TextDisabled("%s  ·  radio %s", displayName(body->kind), formatDistance(body->radius).c_str());
     } else if (const ShipView* ship = m_snapshot.findShip(m_selected)) {
@@ -742,6 +914,13 @@ void GameApp::drawSelectionPanel() {
         m_map.camera().follow = m_selected;
     }
     ImGui::Separator();
+    if (isPort && ImGui::CollapsingHeader("Mercado", ImGuiTreeNodeFlags_DefaultOpen)) {
+        if (m_selected == m_snapshot.dockedPort) {
+            ImGui::TextColored(color(120, 255, 150), "Atracado aquí: comercia en la ventana Mercado.");
+        } else {
+            drawKnownPrices(m_selected);
+        }
+    }
     if (ImGui::CollapsingHeader("Inspector de entidad", ImGuiTreeNodeFlags_DefaultOpen)) {
         const EntityId clicked = m_inspector.draw(simulation().world(), m_selected);
         if (clicked.isValid()) {
@@ -872,6 +1051,9 @@ void GameApp::drawDebugPanel() {
     if (ImGui::Button("Nueva partida")) {
         g_pendingAction = PendingAction::NewGame;
     }
+    if (ImGui::CollapsingHeader("Economía (verdad)")) {
+        drawEconomyInspector();
+    }
     if (ImGui::CollapsingHeader("Perfilador", ImGuiTreeNodeFlags_DefaultOpen)) {
         if (ImGui::SmallButton("Reiniciar estadísticas")) {
             profiling::resetStats();
@@ -914,6 +1096,8 @@ void GameApp::drawHelp() {
         "R: radar (ves más, pero te ven de lejos)   ·   T: transpondedor (difunde tu identidad)");
     ImGui::BulletText("E: atacar el contacto seleccionado (lo persigue y dispara)   ·   C: alto el fuego");
     ImGui::BulletText("Los piratas acechan junto a los pozos; cerca de las estaciones estás a salvo");
+    ImGui::BulletText("Atracado en un puerto: compra y vende en la ventana Mercado. Las estaciones te dan el "
+                      "boletín de precios de los comerciantes");
     ImGui::BulletText("H: seguir tu nave   ·   F: seguir la selección   ·   Esc: deseleccionar");
     ImGui::BulletText("F5: guardar   ·   F9: cargar   ·   F3: depuración   ·   F1: esta ayuda");
     ImGui::End();

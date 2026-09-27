@@ -6,14 +6,23 @@
 > (`Game/Sandbox/Content.h`) o en parámetros de generación, no dispersos por los sistemas, para que moverlos
 > a ficheros de datos (modding) sea un cambio local.
 
-## Estado: slice M2.3 "Combate y daño por módulos"
+## Estado: slice M3 "Economía mínima y comercio"
 
-Se puede: empezar una partida en un sistema generado, pilotar la nave (autopiloto con salto al
-hiperespacio, o empuje manual), ver a los cargueros NPC viajar solos entre puertos, jugar en tiempo real
-con aceleración ×3 o ×10, guardar y cargar, e inspeccionar cualquier entidad, con **sensores y niebla de
-guerra** (M2.2) y **combate** (M2.3): armas que disparan a pistas de sensores, daño por módulos, piratas
-que cazan cargueros, reparaciones y reapariciones. **Todavía no hay:** economía jugable, misiles ni defensa
-puntual, facciones políticas ni más de un sistema estelar.
+Se puede:
+
+- empezar una partida en un sistema generado y pilotar la nave (autopiloto con salto al hiperespacio, o
+  empuje manual);
+- jugar en tiempo real con aceleración ×3 o ×10, guardar y cargar, e inspeccionar cualquier entidad;
+- detectar con **sensores y niebla de guerra** (M2.2);
+- **combatir** (M2.3): armas que disparan a pistas de sensores, daño por módulos, piratas que cazan
+  cargueros, reparaciones y reapariciones;
+- **comerciar** (M3): cada puerto tiene un mercado con producción, consumo y precios que siguen a las
+  existencias; los cargueros compran y venden por beneficio, y el jugador también.
+
+Con esto el primer vertical slice del prompt (§5) está completo.
+
+**Todavía no hay:** salarios, impuestos, crédito ni quiebras; misiles ni defensa puntual; facciones
+políticas; más de un sistema estelar.
 
 ## Escala, unidades y tiempo
 
@@ -151,6 +160,81 @@ editor de naves de las referencias). La estructura va primero: si llega a cero, 
 - Los cargueros perdidos se reponen al ritmo de uno por minuto, y los piratas de uno cada 3 minutos (el
   sistema no es una caja cerrada).
 
+## Economía (ADR-027, ADR-028)
+
+**Cadena de suministro.** En cada sistema, los planetas extraen según su tipo; las estaciones fabrican:
+
+| Puerto | Produce | Con | Consume (población) |
+|---|---|---|---|
+| Planeta helado | agua | mantenimiento: maquinaria | alimentos, combustible |
+| Planeta oceánico | alimentos | mantenimiento: maquinaria | combustible |
+| Planeta rocoso / desértico | mineral | mantenimiento: maquinaria | alimentos, agua |
+| Gigante gaseoso | combustible | mantenimiento: maquinaria | alimentos, agua |
+| Estación refinería | metales | 2 t de mineral + 0,5 t de combustible por t | alimentos, agua |
+| Estación fábrica | maquinaria | 2 t de metales + 0,5 t de combustible por t | alimentos, agua |
+
+- Sin insumos esenciales no hay producción.
+- Sin mantenimiento (maquinaria), la extracción cae al 35 %: la cadena se cierra sobre sí misma.
+- Al generar el sistema, cada bien se produce en total un 20 % por encima de lo que se consume. Si un
+  bien no lo puede extraer ningún planeta, la primera estación lo fabrica (hidroponía, recicladoras). Así
+  la escasez local depende del transporte y de los piratas, no de la suerte del generador.
+
+| Bien | Precio base (cr/t) |
+|---|---|
+| Agua | 20 |
+| Alimentos | 40 |
+| Mineral | 30 |
+| Combustible | 50 |
+| Metales | 120 |
+| Maquinaria | 300 |
+
+**Precios.**
+
+- Cada puerto guarda un **objetivo de existencias**: 4 horas de su producción o de su consumo, el mayor
+  de los dos. Su capacidad es el triple.
+- Precio medio = base · 2^(1,5 · (1 − existencias/objetivo)): la base en el objetivo, ×2,83 con el almacén
+  vacío y ×0,21 con 2,5 veces el objetivo.
+- El puerto vende un 4 % por encima y compra un 4 % por debajo.
+- Las operaciones se cobran tonelada a tonelada, así que un pedido grande mueve el precio en su contra.
+
+**Conocimiento.** Nadie lee un mercado remoto:
+
+- Cada facción tiene un **libro de precios** con la edad de cada observación. Al empezar, todos tienen el
+  boletín inicial del sistema.
+- Los comerciantes independientes comparten una red: cada carguero que atraca actualiza los precios de
+  todos.
+- El jugador actualiza los precios del puerto donde atraca, y las **estaciones le dan el boletín** de los
+  comerciantes.
+
+**Cargueros comerciantes.** Al salir de puerto, cada carguero:
+
+1. Si lleva carga, va donde mejor se vende.
+2. Si no, compra aquí lo que más rinde en otro puerto: beneficio por segundo de viaje, descontando precios
+   viejos (a la mitad cada 30 min) y el peligro del destino.
+3. Si aquí no hay nada rentable, va vacío a donde sabe que hay una ganga (reposicionamiento).
+4. Si tampoco, va a refrescar los precios más viejos.
+
+Al estimar lo que obtendrá, sigue la curva de precios real y cuenta con las entregas que la red ya tiene
+en camino a ese puerto. Así varios cargueros no hunden a la vez el mismo mercado.
+
+El **peligro** de un puerto sube cada vez que muere un carguero que iba hacia él y se olvida a la mitad
+cada 20 minutos.
+
+**Causalidad medida** (10 h, 12 cargueros, con y sin 3 piratas):
+
+| Semilla | Entregas | Escasez de agua | Escasez de alimentos |
+|---|---|---|---|
+| 2400 | 16.949 → 11.680 t (−31 %) | 256 → 472 t | 238 → 634 t |
+| 7 | 14.977 → 11.476 t (−23 %) | 132 → 712 t | 58 → 167 t |
+
+**Tú.**
+
+- Empiezas con 2.000 cr y 20 t de bodega (los cargueros llevan 100 t).
+- Atracado en un puerto, compras y vendes en la ventana **Mercado**.
+- Los precios verdes son baratos y los rojos caros, respecto al precio base.
+- Seleccionando un puerto ves los precios que conoces y su antigüedad.
+- Si te destruyen, pierdes la carga pero no los créditos.
+
 ## Facciones y personajes (mínimo)
 
 - **Jugador** (verde), **Transportistas independientes** (azul) y **Piratas** (rojo). La política, las
@@ -165,8 +249,8 @@ editor de naves de las referencias). La estructura va primero: si llega a cero, 
 - La galaxia actúa sin el jugador: los cargueros viajan y atracan aunque el jugador no haga nada, y cada
   llegada queda en el diario.
 - Un carguero atacado huye a la estación más cercana, donde los piratas no se atreven a entrar.
-- Próximo paso (M3, economía): los destinos dependerán de oferta, demanda y precios (utility AI) y la carga
-  será real.
+- Desde M3 los cargueros comercian: eligen carga y destino por beneficio con lo que sabe su red (ver
+  Economía).
 
 **Piratas (ADR-026).** Deciden solo con la imagen de sensores de su facción, nunca con la verdad:
 
@@ -199,6 +283,7 @@ editor de naves de las referencias). La estructura va primero: si llega a cero, 
 | Atacar el contacto seleccionado (lo persigue a 300 km y dispara) | E |
 | Alto el fuego | C |
 | Interceptar sin disparar | botón en la selección del contacto |
+| Comprar / vender | ventana Mercado, atracado en un puerto (+1, +10, −1, Todo) |
 | Pausa / velocidad | Espacio / 1 (×1), 2 (×3), 3 (×10) |
 | Seguir tu nave / la selección | H / F |
 | Guardar / cargar | F5 / F9 |
@@ -220,9 +305,11 @@ editor de naves de las referencias). La estructura va primero: si llega a cero, 
 ## Pendiente de decidir (para `game.md` o para próximos slices)
 
 1. Consecuencias de apagar el transpondedor (ley, reputación) y guerra electrónica.
-2. Misiles, defensa puntual, blindaje o escudos, y abordaje con botín (cuando exista la carga, M3).
-6. Consecuencias de atacar a cargueros o a otras facciones: reputación, policía de las estaciones y
+2. Misiles, defensa puntual, blindaje o escudos, y abordaje con botín de las naves sin energía.
+3. Consecuencias de atacar a cargueros o a otras facciones: reputación, policía de las estaciones y
    recompensas por piratas.
-3. Bienes, producción y precios de los puertos (M3).
-4. Hiperespacio o viaje entre sistemas y la estructura de la galaxia.
-5. Nombre del juego, tono y estética definitiva.
+4. Economía completa (§18): salarios, impuestos, crédito, deuda, seguros, inversión y quiebra. Ahora el
+   dinero de los comerciantes solo crece; faltan sumideros (costes de operación).
+5. Población con efectos: la escasez debería afectar a la estabilidad y al crecimiento.
+6. Viaje entre sistemas y la estructura de la galaxia.
+7. Nombre del juego, tono y estética definitiva.

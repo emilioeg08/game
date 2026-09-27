@@ -101,6 +101,7 @@ int main(int argc, char** argv) {
         {"sim.grain", &benchGrain},
         {"sim.saveload", &benchSaveLoad},
         {"sim.sandbox", &benchSandbox},
+        {"sim.economy", &benchEconomy},
     };
 
     Report report;

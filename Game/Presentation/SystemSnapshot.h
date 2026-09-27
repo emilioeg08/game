@@ -3,6 +3,7 @@
 #include "Engine/Core/Types.h"
 #include "Engine/Math/Vec3.h"
 #include "Engine/Time/SimTime.h"
+#include "Simulation/Economy/Economy.h"
 #include "Simulation/World/EntityRegistry.h"
 #include "Space/Bodies/CelestialBody.h"
 #include "Space/Combat/Combat.h"
@@ -97,6 +98,33 @@ struct ContactView {
     bool ghost = false;    // DEBUG ONLY: the player cannot know this
 };
 
+// One good of a port's live market.
+struct MarketRowView {
+    GoodId good = 0;
+    std::string_view name;
+    f64 basePrice = 0.0;
+    f64 stock = 0.0;
+    f64 target = 0.0;
+    i64 buy = 0;          // the port sells at (next tonne)
+    i64 sell = 0;         // the port buys at
+    f64 production = 0.0; // t/h at full efficiency
+    f64 consumption = 0.0;
+    f64 shortage = 0.0; // cumulative unmet demand
+};
+
+// Live market of a port. The player sees the one it is docked at; the rest is for the economy inspector.
+struct MarketView {
+    EntityId port;
+    std::vector<MarketRowView> rows;
+};
+
+// Prices the player knows for a port, and how old they are.
+struct KnownPricesView {
+    EntityId port;
+    f64 ageSeconds = 0.0;
+    const PortPrices* prices = nullptr; // valid until the next simulation step
+};
+
 // Read-only picture of the simulation for rendering, UI and debug tools: the presentation layer never touches
 // live components. Views reference names owned by the World and are valid until the next simulation step.
 struct SystemSnapshot {
@@ -114,10 +142,19 @@ struct SystemSnapshot {
     f64 playerEmission = 0.0;  // how bright the player's ship is right now
     std::vector<ModuleView> playerModules;
     bool tactical = false; // fine flight/combat steps
+    // Economy.
+    i64 playerCredits = 0;
+    u32 playerCargoCapacity = 0;
+    std::vector<CargoItem> playerCargo;
+    EntityId dockedPort; // the port whose market the player can trade at, or invalid
+    std::vector<MarketView> markets;
+    std::vector<KnownPricesView> knownPrices;
 
     [[nodiscard]] const BodyView* findBody(EntityId id) const;
     [[nodiscard]] const ShipView* findShip(EntityId id) const;
     [[nodiscard]] const ContactView* findContact(u32 trackId) const;
+    [[nodiscard]] const MarketView* findMarket(EntityId port) const;
+    [[nodiscard]] const KnownPricesView* findKnownPrices(EntityId port) const;
     // Position of a body or ship in this snapshot.
     [[nodiscard]] bool positionOf(EntityId id, Vec3d& out) const;
 };

@@ -8,6 +8,7 @@
 #include "Engine/Time/Stopwatch.h"
 #include "Game/Sandbox/Sandbox.h"
 #include "Scenarios/SyntheticGalaxy.h"
+#include "Simulation/Economy/Economy.h"
 #include "Simulation/Kernel/Simulation.h"
 
 #include <memory>
@@ -219,6 +220,50 @@ void benchSandbox(Report& report, const Options& options) {
     }
     const std::vector<profiling::ZoneSummary> zones = profiling::summary();
     std::printf("zones of the last run:\n%s", profiling::formatSummaryTable(zones).c_str());
+}
+
+void benchEconomy(Report& report, const Options& options) {
+    section(
+        "sim.economy (markets alone: a planet-like market with a recipe, upkeep and two demands; 1 simulated "
+        "hour at 10 s ticks)");
+    const std::vector<u32> scales =
+        options.quick ? std::vector<u32>{1'000, 10'000} : std::vector<u32>{1'000, 10'000, 100'000};
+    std::printf("%10s %8s %10s %12s %12s\n", "markets", "threads", "wall ms", "us/tick", "ns/market");
+    for (const u32 count : scales) {
+        for (const u32 threads : {1u, options.threads}) {
+            JobSystem jobs(threads - 1);
+            Simulation simulation({.seed = 5}, jobs);
+            EconomySystem::registerTypes(simulation);
+            EconomySystem economy;
+            economy.setGoods({{"water", 20.0}, {"food", 40.0}, {"ore", 30.0}, {"machinery", 300.0}});
+            economy.install(simulation, SimDuration::seconds(10));
+            for (u32 i = 0; i < count; ++i) {
+                Market market;
+                for (GoodId good = 0; good < 4; ++good) {
+                    MarketGood& entry = market.ensure(good);
+                    entry.target = 400.0 + (i % 50);
+                    entry.capacity = entry.target * 3.0;
+                    entry.stock = entry.target;
+                }
+                market.recipes.push_back({2, 240.0, {{3, 0.03, false}}});
+                market.demands.push_back({0, 40.0});
+                market.demands.push_back({1, 40.0});
+                simulation.world().components<Market>().add(simulation.world().createEntity(), market);
+            }
+            const Stopwatch timer;
+            simulation.runFor(SimDuration::hours(1));
+            const f64 wallMs = timer.elapsedMs();
+            const f64 usPerTick = wallMs * 1000.0 / 360.0;
+            const f64 nsPerMarket = usPerTick * 1000.0 / count;
+            std::printf("%10u %8u %10.1f %12.1f %12.1f\n", count, threads, wallMs, usPerTick, nsPerMarket);
+            std::fflush(stdout);
+            report.add("sim.economy", {{"markets", Report::integer(count)},
+                                       {"threads", Report::integer(threads)},
+                                       {"wall_ms", Report::number(wallMs)},
+                                       {"us_per_tick", Report::number(usPerTick)},
+                                       {"ns_per_market", Report::number(nsPerMarket)}});
+        }
+    }
 }
 
 void benchSaveLoad(Report& report, const Options& options) {

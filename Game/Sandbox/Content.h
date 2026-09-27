@@ -1,6 +1,8 @@
 #pragma once
 
 #include "Engine/Core/Types.h"
+#include "Simulation/Economy/Economy.h"
+#include "Space/Bodies/CelestialBody.h"
 #include "Space/Combat/Combat.h"
 #include "Space/Ships/Modules.h"
 
@@ -136,6 +138,86 @@ inline constexpr f64 kPirateGiveUpRange = 6e8;        // m: a hunt is abandoned 
 inline constexpr f64 kPirateFleeStructure = 0.4;      // structure share below which a raider leaves
 inline constexpr f64 kStationSafeRadius = 50e6;       // m: raiders do not attack near a station's guns
 inline constexpr f64 kHyperspaceSpeedThreshold = 1e8; // m/s: tracks faster than this are in hyperspace
+
+// --- Economy (ADR-027) ------------------------------------------------------------------------------------
+// A supply chain in one system: planets extract water, food, ore and fuel; the refinery turns ore and fuel
+// into metals, the factory metals and fuel into machinery, and machinery keeps the planets' extraction
+// running (upkeep). Populations everywhere eat and drink. Rates are tonnes per hour at x1 (real time).
+
+enum Good : u32 { kGoodWater, kGoodFood, kGoodOre, kGoodFuel, kGoodMetals, kGoodMachinery, kGoodCount };
+
+inline std::vector<GoodDef> goodTable() {
+    return {{"Agua", 20.0},        {"Alimentos", 40.0}, {"Mineral", 30.0},
+            {"Combustible", 50.0}, {"Metales", 120.0},  {"Maquinaria", 300.0}};
+}
+
+inline constexpr std::array<u32, kShipClassCount> kCargoCapacity = {20, 100, 30}; // tonnes
+inline constexpr i64 kPlayerStartCredits = 2'000;
+inline constexpr i64 kHaulerStartCredits = 3'000;
+inline constexpr f64 kMarketStockHours = 4.0; // target stock: four hours of the larger of output and use
+inline constexpr f64 kMarketCapacityFactor = 3.0;
+inline constexpr f64 kMarketMinTarget = 100.0; // tonnes
+inline constexpr f64 kSupplyMargin = 1.2;      // total output of every good over its total use, at generation
+
+// Hauler trading rules.
+inline constexpr i64 kHaulerMinProfit = 150;       // credits: below this a trip is not worth loading
+inline constexpr f64 kHaulerMaxMarketShare = 0.5;  // never empty more than half of a market's stock
+inline constexpr f64 kKnowledgeHalfLife = 1'800.0; // s: a price seen 30 min ago counts half
+inline constexpr f64 kDangerHalfLife = 1'200.0;    // s: memory of a loss near a port
+inline constexpr f64 kTripOverhead = 180.0;        // s: charging, wells and docking in a trip estimate
+inline constexpr f64 kExploreAfter = 1'200.0;      // s: prices older than this are worth refreshing
+
+enum class PortRole : u8 { Planet, Refinery, Factory, Industry };
+
+// Economic profile of a port. Targets and capacities are filled in by the caller from the rates.
+inline Market portMarket(BodyKind kind, PortRole role) {
+    const RecipeInput upkeep2{kGoodMachinery, 0.02, false};
+    const RecipeInput upkeep3{kGoodMachinery, 0.03, false};
+    Market market;
+    const auto produce = [&](Good output, f64 rate, std::vector<RecipeInput> inputs) {
+        market.recipes.push_back({output, rate, std::move(inputs)});
+    };
+    const auto consume = [&](Good good, f64 rate) { market.demands.push_back({good, rate}); };
+    switch (kind) {
+    case BodyKind::IcePlanet:
+        produce(kGoodWater, 240.0, {upkeep2});
+        consume(kGoodFood, 40.0);
+        consume(kGoodFuel, 10.0);
+        break;
+    case BodyKind::OceanPlanet:
+        produce(kGoodFood, 240.0, {upkeep2});
+        consume(kGoodFuel, 20.0);
+        break;
+    case BodyKind::RockyPlanet:
+        produce(kGoodOre, 240.0, {upkeep3});
+        consume(kGoodFood, 40.0);
+        consume(kGoodWater, 40.0);
+        break;
+    case BodyKind::DesertPlanet:
+        produce(kGoodOre, 180.0, {upkeep3});
+        consume(kGoodFood, 40.0);
+        consume(kGoodWater, 60.0);
+        break;
+    case BodyKind::GasGiant:
+        produce(kGoodFuel, 240.0, {upkeep3});
+        consume(kGoodFood, 30.0);
+        consume(kGoodWater, 30.0);
+        break;
+    case BodyKind::Station:
+        if (role == PortRole::Refinery || role == PortRole::Industry) {
+            produce(kGoodMetals, 120.0, {{kGoodOre, 2.0, true}, {kGoodFuel, 0.5, true}});
+        }
+        if (role == PortRole::Factory || role == PortRole::Industry) {
+            produce(kGoodMachinery, 40.0, {{kGoodMetals, 2.0, true}, {kGoodFuel, 0.5, true}});
+        }
+        consume(kGoodFood, 50.0);
+        consume(kGoodWater, 50.0);
+        break;
+    default:
+        break;
+    }
+    return market;
+}
 
 inline constexpr const char* kPlayerShipName = "Errante";
 

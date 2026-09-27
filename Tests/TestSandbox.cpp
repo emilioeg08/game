@@ -4,12 +4,15 @@
 #include "Game/Presentation/SystemSnapshot.h"
 #include "Game/Sandbox/Content.h"
 #include "Game/Sandbox/Sandbox.h"
+#include "Simulation/Economy/Economy.h"
 #include "Simulation/Kernel/Simulation.h"
 #include "Space/Bodies/CelestialBody.h"
 
 #include <cmath>
 #include <limits>
 #include <string>
+#include <utility>
+#include <vector>
 
 using namespace gx;
 
@@ -330,4 +333,191 @@ GX_TEST(Sandbox, PlayerIsReplacedAfterBeingDestroyed) {
     GX_EXPECT(replacement != player);
     GX_EXPECT(session.playerControl().target == session.sandbox.homePort());
     GX_EXPECT(session.journalContains("Una nave nueva"));
+}
+
+namespace {
+
+// Tonnes of each good in the markets and in the holds, as the economy inspector would sum them.
+struct GoodsCensus {
+    std::vector<f64> produced;
+    std::vector<f64> consumed;
+    std::vector<f64> stock;
+    std::vector<f64> cargo;
+};
+
+GoodsCensus census(const World& world) {
+    GoodsCensus result;
+    result.produced.assign(content::kGoodCount, 0.0);
+    result.consumed.assign(content::kGoodCount, 0.0);
+    result.stock.assign(content::kGoodCount, 0.0);
+    result.cargo.assign(content::kGoodCount, 0.0);
+    for (const Market& market : world.components<Market>().values()) {
+        for (const MarketGood& good : market.goods) {
+            result.produced[good.good] += good.produced;
+            result.consumed[good.good] += good.consumed;
+            result.stock[good.good] += good.stock;
+        }
+    }
+    for (const CargoHold& hold : world.components<CargoHold>().values()) {
+        for (const CargoItem& item : hold.items) {
+            result.cargo[item.good] += item.tonnes;
+        }
+    }
+    return result;
+}
+
+} // namespace
+
+GX_TEST(Sandbox, EveryPortHasAMarketAndEveryGoodASupplier) {
+    Session session(0, peaceful());
+    session.sandbox.populate(session.simulation);
+    const World& world = session.simulation.world();
+    for (const EntityId port : session.sandbox.ports()) {
+        GX_EXPECT(world.components<Market>().contains(port));
+    }
+    for (GoodId good = 0; good < content::kGoodCount; ++good) {
+        f64 production = 0.0;
+        f64 consumption = 0.0;
+        for (const Market& market : world.components<Market>().values()) {
+            production += productionRate(market, good);
+            consumption += consumptionRate(market, good);
+        }
+        GX_EXPECT(consumption > 0.0);
+        GX_EXPECT(production >= consumption * content::kSupplyMargin - 1e-6); // no structural famine
+    }
+    const EntityId player = session.sandbox.playerShip();
+    GX_EXPECT_EQ(world.components<Wallet>().get(player).credits, content::kPlayerStartCredits);
+    GX_EXPECT_EQ(world.components<CargoHold>().get(player).capacity,
+                 content::kCargoCapacity[content::kShipClassCourier]);
+    GX_EXPECT_EQ(session.sandbox.playerPrices().ports.size(),
+                 session.sandbox.ports().size()); // opening bulletin
+}
+
+GX_TEST(Sandbox, GoodsAreConservedThroughTradeAndLosses) {
+    Session session(3); // with pirates: goods also leave the economy with destroyed ships
+    session.sandbox.populate(session.simulation);
+    session.simulation.runFor(SimDuration::hours(2));
+    const GoodsCensus now = census(session.simulation.world());
+    const SandboxStats& stats = session.sandbox.stats();
+    for (GoodId good = 0; good < content::kGoodCount; ++good) {
+        const f64 lost = static_cast<f64>(stats.cargoLost[good]);
+        GX_EXPECT_NEAR(session.sandbox.initialStock()[good] + now.produced[good] - now.consumed[good] - lost,
+                       now.stock[good] + now.cargo[good], 1e-6);
+    }
+    GX_EXPECT(stats.haulerTrades > 0);
+    GX_EXPECT(stats.tonnesDelivered > 0);
+}
+
+GX_TEST(Sandbox, HaulersTradeAtAProfit) {
+    Session session(3, peaceful());
+    session.sandbox.populate(session.simulation);
+    const World& world = session.simulation.world();
+    session.simulation.runFor(SimDuration::hours(3));
+    i64 credits = 0;
+    for (const EntityId hauler : world.components<HaulerBrain>().entities()) {
+        credits += world.components<Wallet>().get(hauler).credits;
+    }
+    GX_EXPECT(credits > content::kHaulerStartCredits * static_cast<i64>(session.sandbox.config().haulers));
+    GX_EXPECT(session.sandbox.stats().tonnesDelivered > 1'000);
+}
+
+GX_TEST(Sandbox, PiratesDisruptTheSupplyChain) {
+    // Causality (prompt §30): losses on the routes mean fewer deliveries and cargo gone for good.
+    const auto run = [](u32 pirates) {
+        SandboxConfig config;
+        config.pirates = pirates;
+        Session session(3, config);
+        session.sandbox.populate(session.simulation);
+        session.simulation.runFor(SimDuration::hours(4));
+        u64 lost = 0;
+        for (const u64 tonnes : session.sandbox.stats().cargoLost) {
+            lost += tonnes;
+        }
+        return std::pair<u64, u64>{session.sandbox.stats().tonnesDelivered, lost};
+    };
+    const auto [calmDelivered, calmLost] = run(0);
+    const auto [raidedDelivered, raidedLost] = run(6);
+    GX_EXPECT_EQ(calmLost, 0u);
+    GX_EXPECT(raidedLost > 0);
+    GX_EXPECT(raidedDelivered < calmDelivered);
+}
+
+GX_TEST(Sandbox, PlayerBuysAndSellsWhenDocked) {
+    Session session(0, peaceful());
+    session.sandbox.populate(session.simulation);
+    World& world = session.simulation.world();
+    const EntityId player = session.sandbox.playerShip();
+    const EntityId port = session.sandbox.dockedPort(world, player);
+    GX_REQUIRE(port.isValid()); // starts docked at the home station
+    const Market& market = world.components<Market>().get(port);
+    GoodId good = market.goods.front().good;
+    for (const MarketGood& candidate : market.goods) {
+        good = candidate.stock > market.find(good)->stock ? candidate.good : good;
+    }
+
+    session.simulation.submitCommand(TradeCommand{player, good, 5});
+    session.simulation.runFor(SimDuration::seconds(1));
+    const i64 afterBuying = world.components<Wallet>().get(player).credits;
+    GX_EXPECT_EQ(world.components<CargoHold>().get(player).amount(good), 5u);
+    GX_EXPECT(afterBuying < content::kPlayerStartCredits);
+    GX_EXPECT(session.journalContains("Compras 5 t"));
+
+    session.simulation.submitCommand(TradeCommand{player, good, -5});
+    session.simulation.runFor(SimDuration::seconds(1));
+    const i64 afterSelling = world.components<Wallet>().get(player).credits;
+    GX_EXPECT_EQ(world.components<CargoHold>().get(player).amount(good), 0u);
+    GX_EXPECT(afterSelling > afterBuying);
+    GX_EXPECT(afterSelling < content::kPlayerStartCredits); // the spread is the market's cut
+    GX_EXPECT_EQ(session.sandbox.stats().playerTrades, 2u);
+
+    // Undocked, or a good the port does not trade: rejected, with a reason in the journal.
+    const u64 rejectedBefore = session.sandbox.stats().commandsRejected;
+    GoodId untraded = content::kGoodCount;
+    for (GoodId g = 0; g < content::kGoodCount && untraded == content::kGoodCount; ++g) {
+        untraded = market.find(g) == nullptr ? g : untraded;
+    }
+    if (untraded < content::kGoodCount) {
+        session.simulation.submitCommand(TradeCommand{player, untraded, 1});
+    }
+    session.simulation.submitCommand(TradeCommand{player, good, 1'000'000}); // capped by hold and credits
+    session.pilot(FlightMode::Stop);
+    session.simulation.runFor(SimDuration::seconds(1));
+    session.simulation.submitCommand(TradeCommand{player, good, 1});
+    session.simulation.runFor(SimDuration::seconds(1));
+    GX_EXPECT(session.journalContains("atracado en un puerto"));
+    GX_EXPECT_EQ(session.sandbox.stats().commandsRejected,
+                 rejectedBefore + (untraded < content::kGoodCount ? 2u : 1u));
+    GX_EXPECT(world.components<CargoHold>().get(player).used() <=
+              world.components<CargoHold>().get(player).capacity);
+    GX_EXPECT(world.components<Wallet>().get(player).credits >= 0);
+}
+
+GX_TEST(Sandbox, StationsPublishTheTradersPriceBulletin) {
+    Session session(3, peaceful());
+    session.sandbox.populate(session.simulation);
+    World& world = session.simulation.world();
+    session.simulation.runFor(
+        SimDuration::minutes(30)); // traders see fresher prices than the opening bulletin
+    // Fly to the other station.
+    EntityId other;
+    for (const EntityId port : session.sandbox.ports()) {
+        if (port != session.sandbox.homePort() &&
+            world.components<CelestialBody>().get(port).kind == BodyKind::Station) {
+            other = port;
+        }
+    }
+    GX_REQUIRE(other.isValid());
+    session.pilot(FlightMode::Approach, other);
+    for (int slice = 0;
+         slice < 30 && !(session.playerControl().arrived && session.playerControl().target == other);
+         ++slice) {
+        session.simulation.runFor(SimDuration::minutes(1));
+    }
+    GX_REQUIRE(session.playerControl().arrived);
+    GX_EXPECT(session.journalContains("Boletín de precios"));
+    u32 fresher = 0;
+    for (const PortPrices& known : session.sandbox.playerPrices().ports) {
+        fresher += known.observed > SimTime::epoch() ? 1u : 0u;
+    }
+    GX_EXPECT(fresher > 1); // not just the station it docked at
 }

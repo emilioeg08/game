@@ -209,3 +209,36 @@ Zonas con 2.000 cargueros y 100 piratas:
 | 7 | 61 | 4 | 0 |
 | 99 | 30 | 3 | 0 |
 | 12345 | 36 | 3 | 0 |
+
+## M3 — Economía (2026-09-27)
+
+`gx_bench --filter sim.economy`, Release. Mercados solos (un mercado tipo planeta con receta,
+mantenimiento y dos demandas), 1 hora simulada en ticks de 10 s:
+
+| Mercados | 1 hilo: µs/tick | 12 hilos: µs/tick | ns por mercado (12 hilos) |
+|---|---|---|---|
+| 1.000 | 25,9 | 20,8 | 20,8 |
+| 10.000 | 269 | 72,9 | 7,3 |
+| 100.000 | 10.691 | 3.631 | 36,3 |
+
+**Lectura:**
+
+- Un tick cada 10 s simulados con 100.000 mercados cuesta 3,6 ms. A ×10 son 3,6 ms por segundo real.
+- Por encima de 10.000 mercados, el coste por mercado sube de 27 a 107 ns (1 hilo): cada `Market` guarda
+  sus vectores en el heap y los fallos de caché dominan. Para la fase masiva conviene una disposición
+  plana (SoA por bien).
+- En el sandbox, la economía cuesta 3 µs por tick. El planificador de 2.000 comerciantes, 162 µs cada
+  10 s.
+- `sim.sandbox` no cambia de forma apreciable respecto a M2.3 (12 cargueros: ~×23.200; 2.000: ~×250,
+  dentro del ruido). Los sensores siguen siendo el 68 % en el caso grande.
+
+**Equilibrio y causalidad** (`gx_headless --sandbox --minutes 600`, Release, 12 cargueros):
+
+| Semilla | Piratas | Entregado | Escasez de agua | Escasez de alimentos | Cargueros perdidos | Créditos de los comerciantes |
+|---|---|---|---|---|---|---|
+| 2400 | 0 | 16.949 t | 256 t | 238 t | 0 | 317.253 |
+| 2400 | 3 | 11.680 t | 472 t | 634 t | 24 | 180.511 |
+| 7 | 0 | 14.977 t | 132 t | 58 t | 0 | 264.221 |
+| 7 | 3 | 11.476 t | 712 t | 167 t | 22 | 148.010 |
+
+El balance de bienes es exacto (±0,000 t) en todas las ejecuciones.

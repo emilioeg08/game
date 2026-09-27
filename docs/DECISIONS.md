@@ -296,3 +296,55 @@ sustituya y explique por qué.
      duelos de alrededor de un minuto.
   3. Tres piratas persiguieron sin fin a una presa inalcanzable (el bug del hipermotor). Además del arreglo,
      las cacerías caducan a los 3 minutos.
+
+## ADR-027 — Economía: mercados por existencias, recetas y transporte físico
+
+- **Contexto:** prompt §18 (oferta, demanda, producción, consumo, almacenamiento, comercio, logística) y
+  §30 (causalidad: si cae una ruta deben cambiar de verdad precios y disponibilidad). El primer vertical
+  slice (§5) pide economía mínima y comercio.
+- **Decisión:**
+  - `Simulation/Economy` es genérico, sin dependencia del espacio. Tiene:
+    - `Market` (bienes con existencias, objetivo y capacidad; recetas; demandas);
+    - `CargoHold` y `Wallet`;
+    - el precio en función de existencias / objetivo (curva exponencial acotada);
+    - operaciones tonelada a tonelada;
+    - `EconomySystem`, que ejecuta todos los mercados cada 10 s en paralelo (son independientes entre
+      operaciones).
+  - Hay dos clases de insumo: los esenciales limitan la producción; los de mantenimiento, si faltan, la
+    bajan al 35 %. Así la cadena se degrada en lugar de bloquearse.
+  - Los créditos son enteros (`i64`) y el precio de cada tonelada se redondea. Las existencias son `f64`
+    porque la producción es continua; la carga va en toneladas enteras.
+  - Los bienes solo se mueven en bodegas. Una nave destruida pierde su carga, que queda contabilizada.
+  - El contenido (bienes, perfiles de puerto y reparto de capacidad al generar) está en `Content.h`.
+- **Verificado:**
+  - Conservación exacta: existencias iniciales + producido − consumido − perdido = existencias + carga,
+    con 0,000 t de diferencia en todas las ejecuciones medidas.
+  - El test `Economy.ParallelMarketsAreDeterministic` da el mismo estado con 0, 3 y 7 hilos.
+  - El guardado y la carga siguen dando el mismo hash (`Sandbox.SaveLoadContinuesIdentically`).
+- **Consecuencias:** el formato de guardado cambia otra vez. Faltan salarios, impuestos, crédito y
+  quiebra (§18), y la población no tiene todavía efectos más allá de su consumo.
+
+## ADR-028 — Conocimiento de precios y comerciantes que planifican
+
+- **Contexto:** prompt §14 y §17: ni la IA ni el jugador son omniscientes, y la IA actúa según objetivos,
+  riesgos y conocimiento disponible.
+- **Decisión:**
+  - `PriceBook` es un libro por facción con la edad de cada observación. Se actualiza al atracar, y las
+    estaciones publican el de los comerciantes. Guarda también la profundidad del mercado (su objetivo).
+  - El planificador del carguero es una utilidad explícita: beneficio / segundos, descontado por la edad
+    del dato y por el peligro del puerto.
+  - Estima los ingresos siguiendo la curva de precios real, contando las entregas que la red ya tiene en
+    camino y la capacidad del mercado.
+  - Tiene tres recursos: comprar aquí, reposicionarse vacío o explorar.
+- **Mediciones que cambiaron el diseño:**
+  1. La primera versión solo cargaba en el puerto donde estaba: había puertos sin agua a 57 cr mientras
+     otros la acumulaban a 5 cr. De ahí el reposicionamiento.
+  2. Sin piratas, los comerciantes perdían dinero (de 36.000 a 29.765 cr en 3 h): varios elegían la
+     misma ruta con el mismo libro y hundían un mercado poco profundo. Se añadieron las entregas en camino
+     y la estimación sobre la curva, y los mercados pasaron a 4 horas de existencias. Ahora ganan: de
+     36.000 a 317.253 cr en 10 h.
+  3. En los sistemas sin planeta oceánico había hambre estructural permanente. De ahí el reparto de
+     capacidad al generar (20 % de margen sobre el consumo total, recorriendo la cadena hacia arriba y
+     repitiendo hasta estabilizar).
+  4. Un bug de herramienta, no de diseño: un parche hecho con PowerShell 5.1 guardó texto con la
+     codificación rota ("BoletÃ­n"). El test del boletín lo detectó.

@@ -33,6 +33,18 @@ const ContactView* SystemSnapshot::findContact(u32 trackId) const {
     return it == contacts.end() ? nullptr : &*it;
 }
 
+const MarketView* SystemSnapshot::findMarket(EntityId port) const {
+    const auto it =
+        std::find_if(markets.begin(), markets.end(), [port](const MarketView& m) { return m.port == port; });
+    return it == markets.end() ? nullptr : &*it;
+}
+
+const KnownPricesView* SystemSnapshot::findKnownPrices(EntityId port) const {
+    const auto it = std::find_if(knownPrices.begin(), knownPrices.end(),
+                                 [port](const KnownPricesView& k) { return k.port == port; });
+    return it == knownPrices.end() ? nullptr : &*it;
+}
+
 bool SystemSnapshot::positionOf(EntityId id, Vec3d& out) const {
     if (const ShipView* ship = findShip(id)) {
         out = ship->position;
@@ -70,6 +82,12 @@ void SnapshotBuilder::build(const Simulation& simulation, const Sandbox& sandbox
     out.projectiles.clear();
     out.explosions.clear();
     out.playerModules.clear();
+    out.playerCredits = 0;
+    out.playerCargoCapacity = 0;
+    out.playerCargo.clear();
+    out.dockedPort = {};
+    out.markets.clear();
+    out.knownPrices.clear();
     out.playerFaction = content::kFactionPlayer;
     out.playerAlive = false;
     out.playerRespawnIn = 0.0;
@@ -161,6 +179,36 @@ void SnapshotBuilder::build(const Simulation& simulation, const Sandbox& sandbox
 
     if (!out.playerAlive) {
         out.playerRespawnIn = std::max(0.0, (sandbox.playerRespawnAt() - now).toSeconds());
+    }
+
+    // Economy: the player's purse and hold, every market (live) and what the player knows of each.
+    if (out.playerAlive) {
+        const EntityId player = sandbox.playerShip();
+        if (const Wallet* wallet = world.components<Wallet>().tryGet(player)) {
+            out.playerCredits = wallet->credits;
+        }
+        if (const CargoHold* hold = world.components<CargoHold>().tryGet(player)) {
+            out.playerCargoCapacity = hold->capacity;
+            out.playerCargo = hold->items;
+        }
+        out.dockedPort = sandbox.dockedPort(world, player);
+    }
+    const std::vector<GoodDef>& goods = sandbox.economy().goods();
+    const ComponentStore<Market>& markets = world.components<Market>();
+    for (usize i = 0; i < markets.size(); ++i) {
+        const Market& market = markets.values()[i];
+        MarketView view{markets.entities()[i], {}};
+        for (const MarketGood& good : market.goods) {
+            const f64 base = sandbox.economy().basePrice(good.good);
+            view.rows.push_back(
+                {good.good, good.good < goods.size() ? std::string_view(goods[good.good].name) : "?", base,
+                 good.stock, good.target, buyPrice(good, base), sellPrice(good, base),
+                 productionRate(market, good.good), consumptionRate(market, good.good), good.shortage});
+        }
+        out.markets.push_back(std::move(view));
+    }
+    for (const PortPrices& known : sandbox.playerPrices().ports) {
+        out.knownPrices.push_back({known.port, (now - known.observed).toSeconds(), &known});
     }
 
     // Weapon fire and explosions near the player (all of them are kept, flagged, for the debug view).

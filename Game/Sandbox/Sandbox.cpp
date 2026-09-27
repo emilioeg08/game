@@ -92,6 +92,7 @@ void Sandbox::install(Simulation& simulation) {
     registerSpaceTypes(simulation);
     SensorSystem::registerTypes(simulation);
     CombatSystem::registerTypes(simulation);
+    EconomySystem::registerTypes(simulation);
     World& world = simulation.world();
     world.registerComponent<HaulerBrain>("Game.HaulerBrain");
     world.registerComponent<PirateBrain>("Game.PirateBrain");
@@ -121,12 +122,16 @@ void Sandbox::install(Simulation& simulation) {
                                             [this](const EngageCommand& command, const TickContext& context) {
                                                 onEngageCommand(command, context);
                                             });
+    commands.registerCommand<TradeCommand>("Game.Trade",
+                                           [this](const TradeCommand& command, const TickContext& context) {
+                                               onTradeCommand(command, context);
+                                           });
 
     // Behaviour runs before flight in the same phase, so new orders fly in the same step. Sensors scan after
     // flight (they see this step's motion) and combat fires after both, on the flight cadence.
     simulation.addSystem({"Game.Haulers",
                           TickPhase::Simulation,
-                          SimDuration::minutes(1),
+                          SimDuration::seconds(10),
                           {},
                           [this](const TickContext& context) { updateHaulers(context); }});
     simulation.addSystem({"Game.Pirates",
@@ -139,6 +144,8 @@ void Sandbox::install(Simulation& simulation) {
     m_sensors.install(simulation, m_config.sensorScanPeriod);
     m_combat.setWeapons(content::weaponTable());
     m_combat.install(simulation, m_sensors, m_config.strategicFlightPeriod);
+    m_economy.setGoods(content::goodTable());
+    m_economy.install(simulation, m_config.economyPeriod);
     // Repairs, respawns and departures of raiders: structural changes, so after the event subscribers.
     simulation.addSystem({"Game.Upkeep",
                           TickPhase::EventResolution,
@@ -159,6 +166,7 @@ void Sandbox::populate(Simulation& simulation) {
     m_systemName = system.name;
     rebuildPorts(world);
     GX_CHECK(!m_ports.empty() && !m_planets.empty(), "the generated system has no ports");
+    setupMarkets(world);
 
     Rng rng = Rng::forStream(m_config.seed, kSpawnStream);
     m_player = spawnShip(world, now, rng, content::kPlayerShipName, content::kFactionPlayer,
@@ -171,6 +179,14 @@ void Sandbox::populate(Simulation& simulation) {
     }
     m_nextHaulerSpawn = now;
     m_nextPirateSpawn = now;
+    m_playerCredits = content::kPlayerStartCredits;
+    m_stats.cargoLost.assign(content::kGoodCount, 0);
+    // At the start everybody has the system's market bulletin; from then on knowledge travels with ships.
+    for (const EntityId port : m_ports) {
+        const Market& market = world.components<Market>().get(port);
+        m_traderPrices.observe(port, market, m_economy.goods(), now);
+        m_playerPrices.observe(port, market, m_economy.goods(), now);
+    }
     addJournal(now, std::format("Comienza la partida en el sistema {}.", m_systemName));
 }
 
@@ -213,7 +229,319 @@ EntityId Sandbox::spawnShip(World& world, SimTime now, Rng& rng, std::string nam
     if (armed) {
         world.components<CombatControl>().add(ship, {});
     }
+    world.components<CargoHold>().add(ship, {content::kCargoCapacity[shipClass], {}});
+    if (faction == content::kFactionPlayer) {
+        world.components<Wallet>().add(ship, {content::kPlayerStartCredits});
+    } else if (faction == content::kFactionIndependent) {
+        world.components<Wallet>().add(ship, {content::kHaulerStartCredits});
+    }
     return ship;
+}
+
+void Sandbox::setupMarkets(World& world) {
+    ComponentStore<Market>& markets = world.components<Market>();
+    const ComponentStore<CelestialBody>& bodies = world.components<CelestialBody>();
+    for (const EntityId port : m_ports) {
+        content::PortRole role = content::PortRole::Planet;
+        for (usize s = 0; s < m_stations.size(); ++s) {
+            if (m_stations[s] == port) {
+                role = m_stations.size() == 1
+                           ? content::PortRole::Industry
+                           : (s % 2 == 0 ? content::PortRole::Refinery : content::PortRole::Factory);
+            }
+        }
+        markets.add(port, content::portMarket(bodies.get(port).kind, role));
+    }
+    // Enough of everything in aggregate (kSupplyMargin over total use), walking the chain downstream-first:
+    // machinery sets the factory's pace, the factory the refinery's, and both the raw goods'. Existing
+    // producers are scaled up, so geography still decides where goods come from; a good nobody can extract is
+    // made up for by the first station. Local shortages are then a matter of transport, not of the
+    // generator's luck.
+    const auto total = [&](GoodId good, auto rateOf) {
+        f64 sum = 0.0;
+        for (const EntityId port : m_ports) {
+            sum += rateOf(markets.get(port), good);
+        }
+        return sum;
+    };
+    // More extraction needs more machinery upkeep, so repeat until nothing changes (two passes in practice).
+    for (bool changed = true; changed;) {
+        changed = false;
+        for (const content::Good good : {content::kGoodMachinery, content::kGoodMetals, content::kGoodWater,
+                                         content::kGoodFood, content::kGoodOre, content::kGoodFuel}) {
+            const f64 needed = total(good, consumptionRate) * content::kSupplyMargin;
+            const f64 supplied = total(good, productionRate);
+            if (supplied >= needed * (1.0 - 1e-9) || needed <= 0.0) {
+                continue;
+            }
+            if (supplied > 0.0) {
+                for (const EntityId port : m_ports) {
+                    for (Recipe& recipe : markets.get(port).recipes) {
+                        recipe.rate *= recipe.output == good ? needed / supplied : 1.0;
+                    }
+                }
+                changed = true;
+            } else if (!m_stations.empty()) {
+                markets.get(m_stations.front())
+                    .recipes.push_back({good, needed, {{content::kGoodMachinery, 0.02, false}}});
+                changed = true;
+            } // else: nowhere to make it (no stations)
+        }
+    }
+    // Listed goods, target stocks and storage from the rates; markets start at their target (base prices).
+    m_initialStock.assign(content::kGoodCount, 0.0);
+    for (const EntityId port : m_ports) {
+        Market& market = markets.get(port);
+        for (const Recipe& recipe : market.recipes) {
+            market.ensure(recipe.output);
+            for (const RecipeInput& input : recipe.inputs) {
+                market.ensure(input.good);
+            }
+        }
+        for (const Demand& demand : market.demands) {
+            market.ensure(demand.good);
+        }
+        for (MarketGood& good : market.goods) {
+            const f64 rate = std::max(productionRate(market, good.good), consumptionRate(market, good.good));
+            good.target = std::max(content::kMarketMinTarget, rate * content::kMarketStockHours);
+            good.capacity = good.target * content::kMarketCapacityFactor;
+            good.stock = good.target;
+            m_initialStock[good.good] += good.stock;
+        }
+    }
+}
+
+EntityId Sandbox::dockedPort(const World& world, EntityId ship) const {
+    const ShipControl* control = world.components<ShipControl>().tryGet(ship);
+    if (control == nullptr || control->mode != FlightMode::Approach || !control->arrived) {
+        return {};
+    }
+    return world.components<Market>().contains(control->target) ? control->target : EntityId{};
+}
+
+f64 Sandbox::danger(EntityId port, SimTime now) const {
+    for (const PortDanger& entry : m_danger) {
+        if (entry.port == port) {
+            return entry.level * std::exp2(-(now - entry.updated).toSeconds() / content::kDangerHalfLife);
+        }
+    }
+    return 0.0;
+}
+
+void Sandbox::addDanger(EntityId port, SimTime now) {
+    const f64 current = danger(port, now);
+    for (PortDanger& entry : m_danger) {
+        if (entry.port == port) {
+            entry.level = current + 1.0;
+            entry.updated = now;
+            return;
+        }
+    }
+    m_danger.push_back({port, 1.0, now});
+}
+
+void Sandbox::planHaulerTrip(World& world, EntityId ship, HaulerBrain& brain, ShipControl& control,
+                             SimTime now, Rng& rng) {
+    CargoHold& hold = world.components<CargoHold>().get(ship);
+    Wallet& wallet = world.components<Wallet>().get(ship);
+    const EntityId here = dockedPort(world, ship);
+    Market* market = here.isValid() ? world.components<Market>().tryGet(here) : nullptr;
+    const std::vector<GoodDef>& goods = m_economy.goods();
+    if (market != nullptr) {
+        m_traderPrices.observe(here, *market, goods, now);
+    }
+
+    // Every option is judged per second of trip, discounted by stale knowledge and by recent losses there.
+    const Vec3d position = world.components<Kinematics>().get(ship).position;
+    const f64 hyperspaceSpeed = content::kShipClasses[content::kShipClassHauler].hyperspaceSpeed;
+    struct Option {
+        EntityId port;
+        const PortPrices* known = nullptr;
+        Vec3d position;
+        f64 seconds = 0.0;   // trip estimate from here
+        f64 freshness = 0.0; // 1 for prices seen now, 1/2 after kKnowledgeHalfLife
+        f64 danger = 0.0;
+        f64 weight = 0.0; // freshness / (seconds * (1 + danger))
+    };
+    std::vector<Option> options;
+    for (const PortPrices& known : m_traderPrices.ports) {
+        if (known.port == here || !world.isAlive(known.port)) {
+            continue;
+        }
+        Option option{known.port, &known, bodyStateAt(world, known.port, now).position};
+        option.seconds = content::kTripOverhead + length(option.position - position) / hyperspaceSpeed;
+        option.freshness = std::exp2(-(now - known.observed).toSeconds() / content::kKnowledgeHalfLife);
+        option.danger = danger(known.port, now);
+        option.weight = option.freshness / (option.seconds * (1.0 + option.danger));
+        options.push_back(option);
+    }
+    const auto inflight = [&](EntityId port, GoodId good) {
+        for (const Delivery& delivery : m_inflight) {
+            if (delivery.port == port && delivery.good == good) {
+                return delivery.tonnes;
+            }
+        }
+        return 0.0;
+    };
+    // What `tonnes` would fetch at a known market: the price moves as they are sold, after the deliveries the
+    // traders already have on their way there, and the market takes no more than it can store.
+    const auto revenue = [&](const PortPrices& known, GoodId good, f64 tonnes) {
+        const PricePoint* bid = known.find(good);
+        if (bid == nullptr || bid->target <= 0.0) {
+            return 0.0;
+        }
+        const f64 stock = bid->stockRatio * bid->target + inflight(known.port, good);
+        const f64 sellable = std::clamp(bid->target * content::kMarketCapacityFactor - stock, 0.0, tonnes);
+        return sellable * unitPrice(m_economy.basePrice(good), stock + sellable / 2.0, bid->target) *
+               (1.0 - kMarketSpread);
+    };
+
+    EntityId destination;
+    GoodId load = 0;
+    u32 loadTonnes = 0;
+    f64 bestScore = 0.0;
+    if (hold.used() > 0) {
+        // Loaded (a sale fell short, or it fled here): where the cargo sells best.
+        for (const Option& option : options) {
+            f64 value = 0.0;
+            for (const CargoItem& item : hold.items) {
+                value += revenue(*option.known, item.good, item.tonnes);
+            }
+            if (value * option.weight > bestScore) {
+                bestScore = value * option.weight;
+                destination = option.port;
+            }
+        }
+    } else if (market != nullptr) {
+        // Empty at a market: the best load here for a port that pays more for it.
+        for (MarketGood& good : market->goods) {
+            const f64 base = m_economy.basePrice(good.good);
+            const i64 unit = buyPrice(good, base);
+            const auto cap = static_cast<u32>(
+                std::min<f64>(hold.space(), std::floor(good.stock * content::kHaulerMaxMarketShare)));
+            u32 tonnes = std::min<u32>(cap, static_cast<u32>(std::max<i64>(0, wallet.credits / unit)));
+            TradeResult quote = quoteBuy(good, base, tonnes);
+            while (tonnes > 0 && quote.credits > wallet.credits) {
+                tonnes = tonnes * 9 / 10;
+                quote = quoteBuy(good, base, tonnes);
+            }
+            if (tonnes == 0) {
+                continue;
+            }
+            for (const Option& option : options) {
+                const f64 profit =
+                    revenue(*option.known, good.good, tonnes) - static_cast<f64>(quote.credits);
+                if (profit >= static_cast<f64>(content::kHaulerMinProfit) &&
+                    profit * option.weight > bestScore) {
+                    bestScore = profit * option.weight;
+                    destination = option.port;
+                    load = good.good;
+                    loadTonnes = tonnes;
+                }
+            }
+        }
+    }
+    if (!destination.isValid() && hold.used() == 0) {
+        // Nothing worth loading here: fly empty to where a known bargain can be bought and sold elsewhere.
+        for (const Option& source : options) {
+            for (const PricePoint& offer : source.known->prices) {
+                if (offer.target <= 0.0) {
+                    continue;
+                }
+                const f64 base = m_economy.basePrice(offer.good);
+                const f64 stock = offer.stockRatio * offer.target;
+                f64 tonnes = std::min<f64>(hold.capacity, std::floor(stock * content::kHaulerMaxMarketShare));
+                const f64 unit = unitPrice(base, stock - tonnes / 2.0, offer.target) * (1.0 + kMarketSpread);
+                tonnes = std::min(tonnes, std::floor(static_cast<f64>(wallet.credits) / unit));
+                if (tonnes < 1.0) {
+                    continue;
+                }
+                for (const Option& buyer : options) {
+                    if (buyer.port == source.port) {
+                        continue;
+                    }
+                    const f64 profit = revenue(*buyer.known, offer.good, tonnes) - tonnes * unit;
+                    if (profit < static_cast<f64>(content::kHaulerMinProfit)) {
+                        continue;
+                    }
+                    const f64 seconds = source.seconds + content::kTripOverhead +
+                                        length(buyer.position - source.position) / hyperspaceSpeed;
+                    const f64 score = profit * source.freshness * buyer.freshness /
+                                      (seconds * (1.0 + source.danger + buyer.danger));
+                    if (score > bestScore) {
+                        bestScore = score;
+                        destination = source.port;
+                    }
+                }
+            }
+        }
+        m_stats.repositionTrips += destination.isValid() ? 1 : 0;
+    }
+    if (!destination.isValid()) {
+        // Nothing worth carrying: refresh the oldest prices, or just move on.
+        const PortPrices* oldest = nullptr;
+        for (const Option& option : options) {
+            if (oldest == nullptr || option.known->observed < oldest->observed) {
+                oldest = option.known;
+            }
+        }
+        if (oldest != nullptr && (now - oldest->observed).toSeconds() > content::kExploreAfter) {
+            destination = oldest->port;
+        } else {
+            std::vector<EntityId> others;
+            for (const EntityId port : m_ports) {
+                if (port != here) {
+                    others.push_back(port);
+                }
+            }
+            destination = others[rng.uniformU32(static_cast<u32>(others.size()))];
+        }
+        ++m_stats.explorationTrips;
+    }
+    if (loadTonnes > 0) {
+        const TradeResult bought =
+            buyGoods(*market->find(load), m_economy.basePrice(load), loadTonnes, hold, wallet);
+        m_stats.haulerTrades += bought.tonnes > 0 ? 1 : 0;
+        m_traderPrices.observe(here, *market, goods, now);
+    }
+    // The network knows where this cargo is going: later plans in this run count on it.
+    for (const CargoItem& item : hold.items) {
+        addInflight(destination, item.good, item.tonnes);
+    }
+    control.mode = FlightMode::Approach;
+    control.target = destination;
+    control.standoff = standoffDistance(world, destination);
+    control.arrived = false;
+    ++brain.trips;
+    ++m_stats.haulerDepartures;
+}
+
+void Sandbox::addInflight(EntityId port, GoodId good, f64 tonnes) {
+    for (Delivery& delivery : m_inflight) {
+        if (delivery.port == port && delivery.good == good) {
+            delivery.tonnes += tonnes;
+            return;
+        }
+    }
+    m_inflight.push_back({port, good, tonnes});
+}
+
+void Sandbox::sellCargo(World& world, EntityId ship, EntityId port, SimTime now) {
+    Market* market = world.components<Market>().tryGet(port);
+    CargoHold* hold = world.components<CargoHold>().tryGet(ship);
+    Wallet* wallet = world.components<Wallet>().tryGet(ship);
+    if (market == nullptr || hold == nullptr || wallet == nullptr) {
+        return;
+    }
+    const std::vector<CargoItem> items = hold->items; // selling edits the hold
+    for (const CargoItem& item : items) {
+        if (MarketGood* good = market->find(item.good)) {
+            const TradeResult sold =
+                sellGoods(*good, m_economy.basePrice(item.good), item.tonnes, *hold, *wallet);
+            m_stats.tonnesDelivered += sold.tonnes;
+        }
+    }
+    m_traderPrices.observe(port, *market, m_economy.goods(), now);
 }
 
 EntityId Sandbox::spawnHauler(World& world, SimTime now, Rng& rng, u32 serial) {
@@ -273,7 +601,18 @@ void Sandbox::updateHaulers(const TickContext& context) {
     World& world = context.world;
     ComponentStore<HaulerBrain>& brains = world.components<HaulerBrain>();
     ComponentStore<ShipControl>& controls = world.components<ShipControl>();
-    const auto portCount = static_cast<u32>(m_ports.size());
+    // Deliveries already on their way, as the traders' network knows them.
+    m_inflight.clear();
+    const ComponentStore<CargoHold>& holds = world.components<CargoHold>();
+    for (usize i = 0; i < brains.size(); ++i) {
+        const ShipControl& control = controls.get(brains.entities()[i]);
+        const CargoHold* hold = holds.tryGet(brains.entities()[i]);
+        if (hold != nullptr && control.mode == FlightMode::Approach && !control.arrived) {
+            for (const CargoItem& item : hold->items) {
+                addInflight(control.target, item.good, item.tonnes);
+            }
+        }
+    }
     for (usize i = 0; i < brains.size(); ++i) {
         const EntityId ship = brains.entities()[i];
         HaulerBrain& brain = brains.values()[i];
@@ -282,25 +621,9 @@ void Sandbox::updateHaulers(const TickContext& context) {
         if (!docked || context.now < brain.departAt) {
             continue;
         }
-        // Next port, never the one it is leaving. Randomness keyed by (ship, trip): order-independent.
+        // Randomness keyed by (ship, trip): order-independent.
         Rng rng = Rng::forStream(context.worldSeed, hashCombine(kRouteStream, entityKey(ship)), brain.trips);
-        u32 lastIndex = portCount;
-        for (u32 p = 0; p < portCount; ++p) {
-            if (m_ports[p] == brain.lastPort) {
-                lastIndex = p;
-            }
-        }
-        u32 next = rng.uniformU32(lastIndex < portCount ? portCount - 1 : portCount);
-        if (lastIndex < portCount && next >= lastIndex) {
-            ++next;
-        }
-        const EntityId destination = m_ports[next];
-        control.mode = FlightMode::Approach;
-        control.target = destination;
-        control.standoff = standoffDistance(world, destination);
-        control.arrived = false;
-        ++brain.trips;
-        ++m_stats.haulerDepartures;
+        planHaulerTrip(world, ship, brain, control, context.now, rng);
     }
 }
 
@@ -498,6 +821,7 @@ void Sandbox::updateUpkeep(const TickContext& context) {
     if (!m_player.isValid() && now >= m_playerRespawnAt) {
         m_player = spawnShip(world, now, rng, content::kPlayerShipName, content::kFactionPlayer,
                              content::kShipClassCourier, m_home);
+        world.components<Wallet>().get(m_player).credits = m_playerCredits;
         ++m_stats.spawns;
         addJournal(now, std::format("Una nave nueva te espera en {}.", nameOf(world, m_home)));
     }
@@ -520,6 +844,7 @@ void Sandbox::onShipArrived(const ShipArrived& event, const TickContext& context
     ++m_stats.arrivals;
     if (HaulerBrain* brain = world.components<HaulerBrain>().tryGet(event.ship)) {
         brain->lastPort = event.target;
+        sellCargo(world, event.ship, event.target, context.now);
         Rng rng =
             Rng::forStream(context.worldSeed, hashCombine(kDwellStream, entityKey(event.ship)), brain->trips);
         const auto dwellSpanMs = static_cast<u32>((m_config.maxDwell - m_config.minDwell).count() / 1000);
@@ -532,6 +857,18 @@ void Sandbox::onShipArrived(const ShipArrived& event, const TickContext& context
                                     ? std::format("{} ha llegado a {}.", nameOf(world, event.ship),
                                                   nameOf(world, event.target))
                                     : std::format("{} ha llegado a su destino.", nameOf(world, event.ship)));
+        if (const Market* market = world.components<Market>().tryGet(event.target)) {
+            m_playerPrices.observe(event.target, *market, m_economy.goods(), context.now);
+            // Stations publish the traders' price bulletin.
+            const CelestialBody* body = world.components<CelestialBody>().tryGet(event.target);
+            if (body != nullptr && body->kind == BodyKind::Station) {
+                if (const u32 updated = m_playerPrices.mergeNewer(m_traderPrices); updated > 0) {
+                    addJournal(
+                        context.now,
+                        std::format("Boletín de precios de la estación: {} puertos actualizados.", updated));
+                }
+            }
+        }
     }
 }
 
@@ -586,7 +923,27 @@ void Sandbox::onShipDamaged(const ShipDamaged& event, const TickContext& context
 void Sandbox::onShipDestroyed(const ShipDestroyed& event, const TickContext& context) {
     const World& world = context.world;
     const SimTime now = context.now;
+    if (const CargoHold* hold = world.components<CargoHold>().tryGet(event.ship)) {
+        m_stats.cargoLost.resize(std::max<usize>(m_stats.cargoLost.size(), content::kGoodCount), 0);
+        for (const CargoItem& item : hold->items) {
+            m_stats.cargoLost[item.good] += item.tonnes; // the supply chain loses it for good
+        }
+    }
+    if (const HaulerBrain* brain = world.components<HaulerBrain>().tryGet(event.ship)) {
+        // The traders remember where they were heading: that route is dangerous for a while.
+        const ShipControl& control = world.components<ShipControl>().get(event.ship);
+        const EntityId port =
+            control.mode == FlightMode::Approach && world.components<Market>().contains(control.target)
+                ? control.target
+                : brain->lastPort;
+        if (port.isValid()) {
+            addDanger(port, now);
+        }
+    }
     if (event.ship == m_player) {
+        if (const Wallet* wallet = world.components<Wallet>().tryGet(event.ship)) {
+            m_playerCredits = wallet->credits; // insured: the money survives the ship
+        }
         addJournal(now, event.reactorBreach ? "¡Brecha en el reactor! Tu nave ha sido destruida."
                                             : "Tu nave ha sido destruida.");
         ++m_stats.playerDeaths;
@@ -730,6 +1087,60 @@ void Sandbox::onEngageCommand(const EngageCommand& command, const TickContext& c
     updateFlightRate(world, context.now);
 }
 
+void Sandbox::onTradeCommand(const TradeCommand& command, const TickContext& context) {
+    World& world = context.world;
+    const auto reject = [&](const char* reason, const char* message) {
+        ++m_stats.commandsRejected;
+        GX_LOG_WARN("Sandbox", "trade command rejected: {}", reason);
+        if (message != nullptr) {
+            addJournal(context.now, message);
+        }
+    };
+    const ShipIdentity* identity =
+        world.isAlive(command.ship) ? world.components<ShipIdentity>().tryGet(command.ship) : nullptr;
+    CargoHold* hold = world.components<CargoHold>().tryGet(command.ship);
+    Wallet* wallet = world.components<Wallet>().tryGet(command.ship);
+    if (identity == nullptr || identity->faction != content::kFactionPlayer || hold == nullptr ||
+        wallet == nullptr) {
+        reject("not a trading ship of the player", nullptr);
+        return;
+    }
+    const EntityId port = dockedPort(world, command.ship);
+    if (!port.isValid()) {
+        reject("not docked at a port", "Para comerciar hay que estar atracado en un puerto.");
+        return;
+    }
+    Market& market = world.components<Market>().get(port);
+    MarketGood* good = market.find(command.good);
+    if (good == nullptr || command.tonnes == 0) {
+        reject("good not traded here", "Ese bien no se comercia en este puerto.");
+        return;
+    }
+    const std::string& name = m_economy.goods()[command.good].name;
+    const f64 base = m_economy.basePrice(command.good);
+    if (command.tonnes > 0) {
+        const TradeResult bought = buyGoods(*good, base, static_cast<u32>(command.tonnes), *hold, *wallet);
+        if (bought.tonnes == 0) {
+            reject("cannot buy", hold->space() == 0  ? "La bodega está llena."
+                                 : good->stock < 1.0 ? "No quedan existencias."
+                                                     : "No tienes créditos suficientes.");
+            return;
+        }
+        addJournal(context.now,
+                   std::format("Compras {} t de {} por {} cr.", bought.tonnes, name, bought.credits));
+    } else {
+        const TradeResult sold = sellGoods(*good, base, static_cast<u32>(-command.tonnes), *hold, *wallet);
+        if (sold.tonnes == 0) {
+            reject("cannot sell", hold->amount(command.good) == 0 ? "No llevas ese bien."
+                                                                  : "El puerto no admite más de ese bien.");
+            return;
+        }
+        addJournal(context.now, std::format("Vendes {} t de {} por {} cr.", sold.tonnes, name, sold.credits));
+    }
+    ++m_stats.playerTrades;
+    m_playerPrices.observe(port, market, m_economy.goods(), context.now);
+}
+
 void Sandbox::updateFlightRate(const World& world, SimTime now) {
     // Fine flight and combat steps only while the player flies by hand or fights: responsive controls and
     // precise shooting without paying for 20 Hz integration during long autopilot trips. Requests during a
@@ -803,6 +1214,11 @@ void Sandbox::writeState(BinaryWriter& writer) const {
     writer.io(m_systemName);
     writer.io(m_journal);
     writer.io(m_stats);
+    writer.io(m_playerCredits);
+    writer.io(m_playerPrices);
+    writer.io(m_traderPrices);
+    writer.io(m_danger);
+    writer.io(m_initialStock);
 }
 
 void Sandbox::readState(BinaryReader& reader) {
@@ -815,6 +1231,11 @@ void Sandbox::readState(BinaryReader& reader) {
     reader.io(m_systemName);
     reader.io(m_journal);
     reader.io(m_stats);
+    reader.io(m_playerCredits);
+    reader.io(m_playerPrices);
+    reader.io(m_traderPrices);
+    reader.io(m_danger);
+    reader.io(m_initialStock);
     if (reader.ok()) {
         rebuildPorts(m_simulation->world()); // the World is loaded before state blocks
     }

@@ -33,7 +33,7 @@ depurabilidad → moddabilidad → presentación.
         │
  Space/    Orbits · Bodies · Ships · Sensors · Combat · Generation  dominio espacial
         │
- Simulation/  Kernel · World · Events · Commands          estado autoritativo y bucle de pasos
+ Simulation/  Kernel · World · Events · Commands · Economy   estado autoritativo y bucle de pasos
         │
  Engine/  Core · Memory · Math · Jobs · Time · Profiling · Serialization
 ```
@@ -62,6 +62,7 @@ Reglas:
 | `Simulation/World` | `EntityId` generacional, `EntityRegistry`, `ComponentStore<T>` (sparse set), `World` |
 | `Simulation/Events` | `EventChannel<T>`, `EventBus` (emisión serie y paralela, despacho con cascadas) |
 | `Simulation/Commands` | `CommandQueue` (entrada externa serializada, grabación para replay) |
+| `Simulation/Economy` | mercados (existencias, precios, recetas, demandas), bodegas, carteras, operaciones tonelada a tonelada, libros de precios y `EconomySystem` paralelo |
 | `Space/Orbits` | órbitas keplerianas analíticas (solver de Kepler con Newton protegido) |
 | `Space/Bodies` | `CelestialBody`, `OrbitsParent`, estado absoluto por la cadena de padres |
 | `Space/Ships` | componentes de nave, autopiloto (`steer`), `FlightSystem` (dos pases, eventos `ShipArrived`), módulos y daño (`ShipModules`, `applyDamage`, `applyModuleEffects`) |

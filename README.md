@@ -3,7 +3,8 @@
 Motor propio en C++20 para un sandbox 4X de simulación galáctica persistente: la galaxia existe, cambia y
 produce consecuencias aunque el jugador no la esté mirando.
 
-**Estado: M2.3 (Combate y daño por módulos).** Hay un primer juego en tiempo real (×1, ×3, ×10):
+**Estado: M3 (Economía mínima y comercio).** Con él el primer vertical slice está completo. Hay un juego en
+tiempo real (×1, ×3, ×10):
 
 - un sistema estelar generado con órbitas keplerianas;
 - tu nave, con autopiloto y salto al hiperespacio fuera de los pozos gravitatorios, o con empuje newtoniano
@@ -17,6 +18,10 @@ detectas.
 En combate, las armas (láser y cañón de riel) disparan a pistas de sensores, el daño es por módulos y los
 piratas acechan junto a los pozos para cazar cargueros (y a ti). Hay reparaciones en las estaciones y
 reapariciones.
+
+En la economía, cada puerto produce, consume y fija precios según sus existencias, en una cadena que va de
+la extracción a la refinería, la fábrica y la maquinaria. Los cargueros comercian con lo que sabe su red, y
+tú compras y vendes al atracar. Las pérdidas por piratería se notan en la escasez y en los precios.
 
 Por debajo están el kernel de M1 (entidades, eventos, comandos, save/load, replay, LOD por frecuencia) y la
 fase 0. El diseño es provisional
@@ -56,7 +61,7 @@ Presets: `debug` (sin optimizar, con asserts), `release` (optimizado, para bench
 
 Controles: rueda = zoom · arrastrar = mover · clic = seleccionar · **clic derecho = ir allí** ·
 WASD = empuje manual · X = frenar · E = atacar el contacto seleccionado · C = alto el fuego ·
-R/T = radar/transpondedor · Espacio = pausa · 1/2/3 = ×1 (tiempo real)/×3/×10 · H/F = seguir ·
+R/T = radar/transpondedor · ventana Mercado al atracar · Espacio = pausa · 1/2/3 = ×1 (tiempo real)/×3/×10 · H/F = seguir ·
 F5/F9 = guardar/cargar · F3 = depuración · F1 = ayuda. La primera configuración descarga SDL3 y Dear ImGui
 (versiones fijadas); `-DGX_BUILD_CLIENT=OFF` compila sin el cliente.
 
@@ -84,6 +89,7 @@ con `gx_game.exe --seed 1 --fly-to 1 --prerun-hours 0.0745 --engage-nearest --zo
 # El sandbox jugable sin ventana: estadísticas de tráfico y combate, estado de los piratas y diario
 ./build/release/bin/gx_headless.exe --sandbox --minutes 180 --seed 7
 ./build/release/bin/gx_headless.exe --sandbox --minutes 20 --seed 1 --fly-to 1 --journal
+./build/release/bin/gx_headless.exe --sandbox --minutes 600 --pirates 0 --markets   # economía por puerto
 
 ./build/release/bin/gx_headless.exe --help
 ```
@@ -92,14 +98,14 @@ con `gx_game.exe --seed 1 --fly-to 1 --prerun-hours 0.0745 --engage-nearest --zo
 
 ```text
 Engine/        Core, Memory, Math, Jobs, Time, Profiling, Serialization
-Simulation/    Kernel (scheduler, paso, save/load), World (entidades), Events, Commands
+Simulation/    Kernel (scheduler, paso, save/load), World (entidades), Events, Commands, Economy
 Space/         Orbits (Kepler), Bodies, Ships (vuelo, autopiloto, módulos), Sensors, Combat, Generation
 Game/          Sandbox (escenario jugable y contenido provisional), Presentation (SystemSnapshot)
 Scenarios/     cargas sintéticas para tests y benchmarks (no contenido de juego)
 Apps/          gx_game (cliente SDL3 + ImGui), gx_headless
 ThirdParty/    SDL3 y Dear ImGui (FetchContent con hash)
 Benchmarks/    gx_bench
-Tests/         gx_tests (17 suites en CTest)
+Tests/         gx_tests (18 suites en CTest)
 docs/          DESIGN.md, ARCHITECTURE.md, DECISIONS.md, BENCHMARKS.md
 cmake/ scripts/ tools/
 ```
@@ -107,8 +113,8 @@ cmake/ scripts/ tools/
 ## Documentación
 
 - [docs/DESIGN.md](docs/DESIGN.md): diseño de juego provisional (escala, generación, vuelo, naves, sensores,
-  combate, NPC, controles).
+  combate, economía, NPC, controles).
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md): capas, tiempo, pipeline, presentación, threading,
   entidades, eventos, comandos, persistencia, determinismo, LOD, referencias, contradicciones y riesgos.
-- [docs/DECISIONS.md](docs/DECISIONS.md): registro de decisiones (ADR-001 a ADR-026).
+- [docs/DECISIONS.md](docs/DECISIONS.md): registro de decisiones (ADR-001 a ADR-028).
 - [docs/BENCHMARKS.md](docs/BENCHMARKS.md): método y resultados medidos por hito.

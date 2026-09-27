@@ -4,6 +4,7 @@
 #include "Engine/Core/Types.h"
 #include "Engine/Math/Vec3.h"
 #include "Engine/Time/SimTime.h"
+#include "Simulation/Economy/Economy.h"
 #include "Simulation/Kernel/SystemScheduler.h"
 #include "Simulation/World/EntityRegistry.h"
 #include "Space/Combat/Combat.h"
@@ -43,6 +44,7 @@ struct SandboxConfig {
     SimDuration playerRespawnDelay = SimDuration::seconds(10);
     // Tactical steps last this long after the player was last hit.
     SimDuration combatAlert = SimDuration::seconds(30);
+    SimDuration economyPeriod = SimDuration::seconds(10);
 };
 
 // Player input. Validated by the handler (never trusted).
@@ -90,6 +92,20 @@ struct EngageCommand {
         ar.io("track", track);
         ar.io("fire", fire);
         ar.io("pursue", pursue);
+    }
+};
+
+// Player input: buy (tonnes > 0) or sell (tonnes < 0) a good at the port the ship is docked at.
+struct TradeCommand {
+    EntityId ship;
+    GoodId good = 0;
+    i32 tonnes = 0;
+
+    template <typename Archive>
+    void io(Archive& ar) {
+        ar.io("ship", ship);
+        ar.io("good", good);
+        ar.io("tonnes", tonnes);
     }
 };
 
@@ -148,6 +164,12 @@ struct SandboxStats {
     u64 playerDeaths = 0;
     u64 hunts = 0;
     u64 spawns = 0;
+    u64 haulerTrades = 0;     // loads bought by haulers
+    u64 tonnesDelivered = 0;  // sold by haulers at their destination
+    u64 explorationTrips = 0; // haulers flying empty to refresh their prices
+    u64 repositionTrips = 0;  // haulers flying empty to where a known bargain is
+    u64 playerTrades = 0;
+    std::vector<u64> cargoLost; // tonnes by good, lost with destroyed ships
 
     template <typename Archive>
     void io(Archive& ar) {
@@ -160,6 +182,26 @@ struct SandboxStats {
         ar.io("playerDeaths", playerDeaths);
         ar.io("hunts", hunts);
         ar.io("spawns", spawns);
+        ar.io("haulerTrades", haulerTrades);
+        ar.io("tonnesDelivered", tonnesDelivered);
+        ar.io("explorationTrips", explorationTrips);
+        ar.io("repositionTrips", repositionTrips);
+        ar.io("playerTrades", playerTrades);
+        ar.io("cargoLost", cargoLost);
+    }
+};
+
+// What the traders remember about losses near a port (decays with time).
+struct PortDanger {
+    EntityId port;
+    f64 level = 0.0;
+    SimTime updated;
+
+    template <typename Archive>
+    void io(Archive& ar) {
+        ar.io("port", port);
+        ar.io("level", level);
+        ar.io("updated", updated);
     }
 };
 
@@ -187,6 +229,15 @@ public:
     [[nodiscard]] SystemId flightSystem() const { return m_flightSystem; }
     [[nodiscard]] const SensorSystem& sensors() const { return m_sensors; }
     [[nodiscard]] const CombatSystem& combat() const { return m_combat; }
+    [[nodiscard]] const EconomySystem& economy() const { return m_economy; }
+    // Price knowledge of the player and of the independent traders (their shared network).
+    [[nodiscard]] const PriceBook& playerPrices() const { return m_playerPrices; }
+    [[nodiscard]] const PriceBook& traderPrices() const { return m_traderPrices; }
+    [[nodiscard]] f64 danger(EntityId port, SimTime now) const;
+    // Tonnes of each good in the markets when the game started (conservation checks).
+    [[nodiscard]] const std::vector<f64>& initialStock() const { return m_initialStock; }
+    // The port whose market the ship is docked at (keeping station there), or invalid.
+    [[nodiscard]] EntityId dockedPort(const World& world, EntityId ship) const;
     [[nodiscard]] const SandboxConfig& config() const { return m_config; }
     [[nodiscard]] bool tactical() const;
 
@@ -195,6 +246,13 @@ private:
                        EntityId port);
     EntityId spawnHauler(World& world, SimTime now, Rng& rng, u32 serial);
     EntityId spawnPirate(World& world, SimTime now, Rng& rng, u32 serial);
+    void setupMarkets(World& world);
+    void planHaulerTrip(World& world, EntityId ship, HaulerBrain& brain, ShipControl& control, SimTime now,
+                        Rng& rng);
+    void sellCargo(World& world, EntityId ship, EntityId port, SimTime now);
+    void addInflight(EntityId port, GoodId good, f64 tonnes);
+    void addDanger(EntityId port, SimTime now);
+    void onTradeCommand(const TradeCommand& command, const TickContext& context);
     void updateHaulers(const TickContext& context);
     void updatePirates(const TickContext& context);
     void updateUpkeep(const TickContext& context);
@@ -221,6 +279,7 @@ private:
     SystemId m_flightSystem = kInvalidSystemId;
     SensorSystem m_sensors;
     CombatSystem m_combat;
+    EconomySystem m_economy;
     // Saved state.
     EntityId m_player;
     SimTime m_playerRespawnAt;
@@ -231,7 +290,18 @@ private:
     std::string m_systemName;
     std::vector<JournalEntry> m_journal;
     SandboxStats m_stats;
-    // Derived from the World (rebuilt after loading).
+    i64 m_playerCredits = 0; // carried over to a replacement ship
+    PriceBook m_playerPrices;
+    PriceBook m_traderPrices;
+    std::vector<PortDanger> m_danger;
+    std::vector<f64> m_initialStock;
+    // Derived from the World (rebuilt after loading, or on every Game.Haulers run).
+    struct Delivery {
+        EntityId port;
+        GoodId good = 0;
+        f64 tonnes = 0.0;
+    };
+    std::vector<Delivery> m_inflight; // cargo the traders' ships are carrying to each port
     std::vector<EntityId> m_ports;
     std::vector<EntityId> m_stations;
     std::vector<EntityId> m_planets;

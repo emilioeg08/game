@@ -18,6 +18,7 @@
 #include "Game/Sandbox/Sandbox.h"
 #include "Scenarios/SyntheticGalaxy.h"
 #include "Simulation/Kernel/Simulation.h"
+#include "Space/Bodies/CelestialBody.h"
 
 #include <algorithm>
 #include <charconv>
@@ -58,6 +59,7 @@ struct Options {
     u32 pirates = 3;
     i32 flyTo = -1;       // order the player's ship to this port at the start
     bool journal = false; // print the game journal at the end
+    bool markets = false; // print every port's market at the end
 };
 
 void printUsage() {
@@ -82,6 +84,7 @@ void printUsage() {
                 "                      --haulers, --pirates): combat and traffic statistics\n"
                 "  --fly-to <i>        sandbox: send the player's ship to port i at the start\n"
                 "  --journal           sandbox: print the game journal at the end\n"
+                "  --markets           sandbox: print every port's market at the end\n"
                 "  --log-level <lvl>   trace|debug|info|warn|error (default info)\n");
 }
 
@@ -146,6 +149,8 @@ int parseOptions(int argc, char** argv, Options& options) {
             ok = parseNumber(value(), options.flyTo) && options.flyTo >= 0;
         } else if (arg == "--journal") {
             options.journal = true;
+        } else if (arg == "--markets") {
+            options.markets = true;
         } else if (arg == "--no-profile") {
             options.profile = false;
         } else if (arg == "--log-level") {
@@ -277,6 +282,77 @@ void runPaced(Simulation& simulation, const SyntheticGalaxy& galaxy, SimTime end
     }
 }
 
+// Economy summary: flows per good, price spread between ports, conservation of goods and trader activity.
+void printEconomy(const Simulation& simulation, const Sandbox& sandbox, bool perPort) {
+    const World& world = simulation.world();
+    const std::vector<GoodDef>& goods = sandbox.economy().goods();
+    const ComponentStore<Market>& markets = world.components<Market>();
+    const ComponentStore<CargoHold>& holds = world.components<CargoHold>();
+    const SandboxStats& stats = sandbox.stats();
+    std::printf("economy: %-12s %9s %9s %9s %7s %9s %7s %7s %7s  %s\n", "good", "produced", "consumed",
+                "shortage", "lost", "stock", "cargo", "min cr", "max cr", "balance");
+    for (GoodId g = 0; g < goods.size(); ++g) {
+        f64 produced = 0.0;
+        f64 consumed = 0.0;
+        f64 shortage = 0.0;
+        f64 stock = 0.0;
+        f64 minPrice = 1e18;
+        f64 maxPrice = 0.0;
+        for (const Market& market : markets.values()) {
+            if (const MarketGood* good = market.find(g)) {
+                produced += good->produced;
+                consumed += good->consumed;
+                shortage += good->shortage;
+                stock += good->stock;
+                const f64 price = unitPrice(goods[g].basePrice, good->stock, good->target);
+                minPrice = std::min(minPrice, price);
+                maxPrice = std::max(maxPrice, price);
+            }
+        }
+        f64 cargo = 0.0;
+        for (const CargoHold& hold : holds.values()) {
+            cargo += hold.amount(g);
+        }
+        const f64 lost = g < stats.cargoLost.size() ? static_cast<f64>(stats.cargoLost[g]) : 0.0;
+        const f64 initial = g < sandbox.initialStock().size() ? sandbox.initialStock()[g] : 0.0;
+        // initial + produced - consumed - lost must equal what is in the markets and in the holds.
+        const f64 balance = initial + produced - consumed - lost - stock - cargo;
+        std::printf("economy: %-12s %9.0f %9.0f %9.0f %7.0f %9.0f %7.0f %7.0f %7.0f  %+.3f\n",
+                    goods[g].name.c_str(), produced, consumed, shortage, lost, stock, cargo, minPrice,
+                    maxPrice, balance);
+    }
+    i64 haulerCredits = 0;
+    for (const EntityId hauler : world.components<HaulerBrain>().entities()) {
+        if (const Wallet* wallet = world.components<Wallet>().tryGet(hauler)) {
+            haulerCredits += wallet->credits;
+        }
+    }
+    std::printf(
+        "traders: %llu loads, %llu t delivered, %llu repositioning and %llu exploring trips, credits on hand "
+        "%lld (%zu haulers)\n",
+        static_cast<unsigned long long>(stats.haulerTrades),
+        static_cast<unsigned long long>(stats.tonnesDelivered),
+        static_cast<unsigned long long>(stats.repositionTrips),
+        static_cast<unsigned long long>(stats.explorationTrips), static_cast<long long>(haulerCredits),
+        world.components<HaulerBrain>().size());
+    if (!perPort) {
+        return;
+    }
+    for (usize i = 0; i < markets.size(); ++i) {
+        const EntityId port = markets.entities()[i];
+        std::printf("  %-22s danger %.2f\n", world.components<CelestialBody>().get(port).name.c_str(),
+                    sandbox.danger(port, simulation.now()));
+        for (const MarketGood& good : markets.values()[i].goods) {
+            std::printf(
+                "      %-12s stock %7.0f / %7.0f  price %6.0f  prod %5.0f/h  use %5.0f/h  shortage %7.0f\n",
+                goods[good.good].name.c_str(), good.stock, good.target,
+                unitPrice(goods[good.good].basePrice, good.stock, good.target),
+                productionRate(markets.values()[i], good.good),
+                consumptionRate(markets.values()[i], good.good), good.shortage);
+        }
+    }
+}
+
 // The playable slice, unpaced: traffic and combat statistics every tenth of the run (balance and cost).
 int runSandbox(const Options& options) {
     JobSystem jobs(options.threads - 1);
@@ -351,6 +427,7 @@ int runSandbox(const Options& options) {
                         contact == nullptr ? "lost" : (contact->ghost ? "is a ghost" : "target gone"));
         }
     }
+    printEconomy(simulation, sandbox, options.markets);
     if (options.journal) {
         for (const JournalEntry& entry : sandbox.journal()) {
             std::printf("  %s  %s\n", formatSimTime(entry.time, content::kEpochYear).c_str(),

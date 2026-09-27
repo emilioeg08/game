@@ -2,7 +2,8 @@
 // identically headless; this program only presents it and turns player input into commands.
 //
 //   gx_game [--seed <n>] [--frames <n> --screenshot <file.png>] [--prerun-hours <h>] [--zoom <m/px>]
-//           [--follow-star] [--select] [--truth] [--fly-to <port index>] [--engage-nearest]
+//           [--follow-star] [--select] [--select-port <i>] [--truth] [--fly-to <port index>]
+//           [--engage-nearest]
 
 #include "Apps/Game/GameApp.h"
 
@@ -46,6 +47,8 @@ int main(int argc, char** argv) {
             options.showTruth = true;
         } else if (arg == "--engage-nearest") {
             options.engageNearest = true;
+        } else if (arg == "--select-port") {
+            ok = parseNumber(value(), options.selectPort);
         } else if (arg == "--select") {
             options.select = true;
         } else {
