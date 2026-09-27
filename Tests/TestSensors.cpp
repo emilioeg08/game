@@ -175,17 +175,18 @@ GX_TEST(Sensors, NoOmniscienceInTheSandbox) {
 
     const World& world = simulation.world();
     const FactionPicture& picture = sandbox.sensors().picture(content::kFactionPlayer);
-    usize identifiedHaulers = 0;
+    usize identified = 0;
     for (const SensorContact& contact : picture.contacts) {
         if (contact.ghost) {
             continue;
         }
         GX_EXPECT(contact.target != sandbox.playerShip()); // own ships are not sensor contacts
-        GX_EXPECT_EQ(world.components<ShipIdentity>().get(contact.target).faction,
-                     static_cast<u32>(content::kFactionIndependent));
-        identifiedHaulers += contact.level == ContactLevel::Identified ? 1 : 0;
+        GX_EXPECT(world.components<ShipIdentity>().get(contact.target).faction !=
+                  static_cast<u32>(content::kFactionPlayer));
+        identified += contact.level == ContactLevel::Identified ? 1 : 0;
     }
-    // Haulers docked far away, idle, are beyond every sensor: the player does not know where all of them are.
-    GX_EXPECT(identifiedHaulers < world.components<HaulerBrain>().size());
-    GX_EXPECT(identifiedHaulers > 0); // the nearby ones broadcast their transponders
+    // Ships far away and idle are beyond every sensor, and raiders keep their transponders off: the player
+    // does not know where everybody is.
+    GX_EXPECT(identified < world.components<ShipIdentity>().size() - 1);
+    GX_EXPECT(identified > 0); // nearby haulers broadcast their transponders
 }

@@ -167,3 +167,45 @@ Con ×10 como máximo, incluso 2.000 naves en un sistema usan menos del 1 % de u
 La primera versión del escaneo buscaba a los observadores recorriendo todas las naves y los contactos de
 forma lineal: con 2.000 cargueros costaba 2,8 ms por escaneo (690 µs/paso de media). Con listas de
 observadores por facción y un índice de contactos por objetivo baja a 176 µs/paso.
+
+## M2.3 — Combate (2026-09-26)
+
+`gx_bench --filter sim.sandbox`, Release, 3 horas simuladas con vuelo y combate cada 200 ms (54.000 pasos).
+Hay un pirata por cada 20 cargueros (mínimo 3):
+
+| Cargueros | Piratas | µs/paso (12 hilos) | Margen sobre el tiempo real | Disparos | Cargueros perdidos |
+|---|---|---|---|---|---|
+| 12 | 3 | 8,3 | ~×24.200 | 7.388 | 7 |
+| 200 | 10 | 38,6 | ~×5.200 | 92.537 | 103 |
+| 2.000 | 100 | 698,5 | ~×286 | 714.263 | 870 |
+
+Zonas con 2.000 cargueros y 100 piratas:
+
+| Zona | Coste |
+|---|---|
+| `Space.Sensors` | 2,36 ms por escaneo (1 Hz), el 68 % del total |
+| `Space.Flight` | 130 µs/paso |
+| `Space.Combat` | 73 µs/paso (proyectiles 51, armas 21) |
+| `Game.Pirates` | 42 µs por decisión (1 Hz) |
+
+**Prueba de estrés: 2.000 cargueros y 500 piratas** (build profile): ~×90. El escaneo sube a 9 ms.
+
+**Lectura:**
+
+- Los sensores son O(observadores × blancos) por facción. Antes, una facción grande (los cargueros) solo
+  observaba al jugador. Ahora dos facciones grandes se observan entre sí, y el coste se lo lleva el
+  producto.
+- Con ×10 como velocidad máxima, incluso el caso de 2.000 + 100 deja un margen de ~×28.
+- Hay dos mejoras claras, cuando haga falta:
+  - paralelizar el cálculo de SNR (es de solo lectura; aplicar los resultados seguiría siendo serie);
+  - una partición espacial de los observadores, porque el mejor observador suele ser el más cercano.
+- `findContact` pasó de búsqueda lineal a binaria: las pistas están ordenadas por id.
+
+**Equilibrio** (`gx_headless --sandbox --minutes 180`, 12 cargueros y 3 piratas):
+
+| Semilla | Cacerías | Cargueros perdidos | Piratas perdidos |
+|---|---|---|---|
+| 2400 | 30 | 7 | 0 |
+| 7 | 61 | 4 | 0 |
+| 99 | 30 | 3 | 0 |
+| 12345 | 36 | 3 | 0 |

@@ -1,8 +1,8 @@
-// GalaxyEngine graphical client (vertical slice M2.1). The simulation itself lives in the libraries and runs
+// GalaxyEngine graphical client (vertical slice M2). The simulation itself lives in the libraries and runs
 // identically headless; this program only presents it and turns player input into commands.
 //
 //   gx_game [--seed <n>] [--frames <n> --screenshot <file.png>] [--prerun-hours <h>] [--zoom <m/px>]
-//           [--follow-star] [--select] [--fly-to <port index>]
+//           [--follow-star] [--select] [--truth] [--fly-to <port index>] [--engage-nearest]
 
 #include "Apps/Game/GameApp.h"
 
@@ -44,6 +44,8 @@ int main(int argc, char** argv) {
             ok = parseNumber(value(), options.flyToPort);
         } else if (arg == "--truth") {
             options.showTruth = true;
+        } else if (arg == "--engage-nearest") {
+            options.engageNearest = true;
         } else if (arg == "--select") {
             options.select = true;
         } else {

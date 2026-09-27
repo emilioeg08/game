@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Engine/Core/Random.h"
 #include "Engine/Core/Types.h"
 #include "Engine/Math/Vec3.h"
 #include "Engine/Time/SimTime.h"
@@ -35,6 +36,8 @@ inline constexpr f64 kChargingEmission = 1e9;
 inline constexpr f64 kHyperspaceEmission = 1e12; // visible across most of a system
 inline constexpr SimDuration kContactTimeout = SimDuration::seconds(20);
 inline constexpr SimDuration kGhostLifetime = SimDuration::seconds(4);
+inline constexpr f64 kPassiveAngularError = 0.01; // 1-sigma position error as a fraction of range at SNR 1
+inline constexpr f64 kActiveAngularError = 0.0005;
 
 struct SensorSuite {
     f64 passiveSensitivity = 0.0; // m^2 per emission unit
@@ -127,6 +130,10 @@ struct FactionPicture {
 [[nodiscard]] f64 detectionProbability(f64 snr);
 // Distance at which a passive sensor of `sensitivity` detects `emission` with certainty.
 [[nodiscard]] f64 passiveDetectionRange(f64 emission, f64 sensitivity);
+// 1-sigma position error of the best of a passive and an active reading (infinity if neither registers).
+[[nodiscard]] f64 measurementSigma(f64 distance, f64 passiveSnr, f64 activeSnr);
+// Per-axis measurement noise with the given standard deviation.
+[[nodiscard]] Vec3d sensorNoise(Rng& rng, f64 sigma);
 
 class SensorSystem {
 public:

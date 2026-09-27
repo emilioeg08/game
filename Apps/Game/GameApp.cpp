@@ -143,6 +143,26 @@ int GameApp::run(const Options& options) {
         simulation().runFor(SimDuration::microseconds(static_cast<i64>(options.prerunHours * 3.6e9)));
         resetTimeController();
     }
+    if (options.engageNearest) {
+        // Capture helper: what pressing E on the nearest contact does, then a few seconds of the fight.
+        m_snapshotBuilder.build(simulation(), sandbox(), m_snapshot);
+        Vec3d player;
+        const ContactView* nearest = nullptr;
+        if (m_snapshot.positionOf(sandbox().playerShip(), player)) {
+            for (const ContactView& contact : m_snapshot.contacts) {
+                if (nearest == nullptr ||
+                    lengthSquared(contact.position - player) < lengthSquared(nearest->position - player)) {
+                    nearest = &contact;
+                }
+            }
+        }
+        if (nearest != nullptr) {
+            m_selectedContact = nearest->trackId;
+            submitEngage(nearest->trackId, true, true);
+            simulation().runFor(SimDuration::seconds(3));
+            resetTimeController();
+        }
+    }
     if (options.metersPerPixel > 0.0) {
         m_map.camera().metersPerPixel = options.metersPerPixel;
     }
@@ -197,6 +217,14 @@ int GameApp::run(const Options& options) {
         handleKeyboard();
         advanceSimulation(realDeltaNs);
         m_snapshotBuilder.build(simulation(), sandbox(), m_snapshot);
+        if (sandbox().playerShip() != m_knownPlayer) {
+            // A replacement ship after the old one was destroyed: the camera goes with the player.
+            if (sandbox().playerShip().isValid() &&
+                (m_map.camera().follow == m_knownPlayer || !m_map.camera().follow.isValid())) {
+                m_map.camera().follow = sandbox().playerShip();
+            }
+            m_knownPlayer = sandbox().playerShip();
+        }
         handleMap(
             m_map.update(m_snapshot, MapSelection{m_selected, m_selectedContact}, MapOptions{m_showTruth}));
 
@@ -210,6 +238,13 @@ int GameApp::run(const Options& options) {
         }
         if (m_showHelp) {
             drawHelp();
+        }
+        if (!m_snapshot.playerAlive) {
+            const ImVec2 display = ImGui::GetIO().DisplaySize;
+            const std::string text = std::format("NAVE DESTRUIDA  ·  una nave nueva te espera en {:.0f} s",
+                                                 m_snapshot.playerRespawnIn);
+            ImGui::GetForegroundDrawList()->AddText({display.x * 0.5f - 170.0f, display.y * 0.5f - 60.0f},
+                                                    IM_COL32(255, 90, 80, 255), text.c_str());
         }
         if (!m_status.empty() && nowNs < m_statusUntilNs) {
             const ImVec2 display = ImGui::GetIO().DisplaySize;
@@ -256,6 +291,7 @@ void GameApp::newGame() {
     m_selectedContact = 0;
     m_sentThrust = {};
     m_thrusting = false;
+    m_knownPlayer = sandbox().playerShip();
     m_map.camera().follow = sandbox().playerShip();
     m_map.camera().metersPerPixel = 30'000.0;
     resetTimeController();
@@ -296,6 +332,7 @@ void GameApp::quickLoad() {
     m_selectedContact = 0;
     m_sentThrust = {};
     m_thrusting = false;
+    m_knownPlayer = sandbox().playerShip();
     m_map.camera().follow = sandbox().playerShip();
     resetTimeController();
     setStatus(std::format("Partida cargada: {}", contents.info.description));
@@ -335,6 +372,10 @@ void GameApp::submitPilot(FlightMode mode, EntityId target, const Vec3d& point, 
 
 void GameApp::submitSensors(bool activeOn, bool transponderOn) {
     simulation().submitCommand(SensorCommand{sandbox().playerShip(), activeOn, transponderOn});
+}
+
+void GameApp::submitEngage(u32 track, bool fire, bool pursue) {
+    simulation().submitCommand(EngageCommand{sandbox().playerShip(), track, fire, pursue});
 }
 
 void GameApp::handleKeyboard() {
@@ -378,6 +419,12 @@ void GameApp::handleKeyboard() {
     }
     if (ImGui::IsKeyPressed(ImGuiKey_F, false) && m_selected.isValid()) {
         m_map.camera().follow = m_selected;
+    }
+    if (ImGui::IsKeyPressed(ImGuiKey_E, false) && m_selectedContact != 0) {
+        submitEngage(m_selectedContact, true, true);
+    }
+    if (ImGui::IsKeyPressed(ImGuiKey_C, false)) {
+        submitEngage(0, false, false);
     }
     if (ImGui::IsKeyPressed(ImGuiKey_X, false)) {
         submitPilot(FlightMode::Stop);
@@ -484,7 +531,9 @@ void GameApp::drawShipPanel() {
     ImGui::Begin("Nave");
     const ShipView* ship = m_snapshot.findShip(sandbox().playerShip());
     if (ship == nullptr) {
-        ImGui::TextDisabled("Sin nave.");
+        ImGui::TextColored(color(255, 110, 100), "Tu nave ha sido destruida.");
+        ImGui::TextDisabled("Una nave nueva te espera en %s dentro de %.0f s.",
+                            nameOf(sandbox().homePort()).c_str(), m_snapshot.playerRespawnIn);
         ImGui::End();
         return;
     }
@@ -509,6 +558,14 @@ void GameApp::drawShipPanel() {
         ImGui::Text("Distancia:    %s",
                     formatDistance(length(ship->targetPosition - ship->position)).c_str());
         ImGui::Text("Estado:       %s", ship->arrived ? "en posición" : "en ruta");
+    } else if (ship->mode == FlightMode::Pursue) {
+        const ContactView* chased = m_snapshot.findContact(ship->track);
+        ImGui::Text("Persigue:     %s",
+                    chased != nullptr ? contactLabel(*chased).c_str() : "contacto perdido");
+        if (chased != nullptr) {
+            ImGui::Text("Distancia:    %s",
+                        formatDistance(length(chased->position - ship->position)).c_str());
+        }
     }
     if (ImGui::Button("Detener (X)")) {
         submitPilot(FlightMode::Stop);
@@ -521,6 +578,7 @@ void GameApp::drawShipPanel() {
     if (ImGui::Button("Seguir (H)")) {
         m_map.camera().follow = ship->id;
     }
+    drawCombatSection(*ship);
 
     ImGui::Separator();
     ImGui::TextDisabled("Destinos (clic para fijar rumbo)");
@@ -539,6 +597,60 @@ void GameApp::drawShipPanel() {
     }
     ImGui::EndChild();
     ImGui::End();
+}
+
+void GameApp::drawCombatSection(const ShipView& ship) {
+    ImGui::Separator();
+    if (m_snapshot.tactical) {
+        ImGui::TextColored(color(255, 170, 80), "Modo táctico");
+        ImGui::SameLine();
+    }
+    if (!ship.powered) {
+        ImGui::TextColored(color(255, 90, 80), "SIN ENERGÍA: a la deriva hasta que se repare el reactor");
+    } else if (ship.fireTrack != 0) {
+        const ContactView* target = m_snapshot.findContact(ship.fireTrack);
+        ImGui::TextColored(color(255, 110, 100), "Fuego sobre: %s",
+                           target != nullptr ? contactLabel(*target).c_str() : "contacto perdido");
+        if (ImGui::SmallButton("Alto el fuego (C)")) {
+            submitEngage(0, false, false);
+        }
+    } else {
+        ImGui::TextDisabled("Armas en espera");
+    }
+    const std::vector<WeaponDef>& weapons = sandbox().combat().weapons();
+    for (const ModuleView& module : m_snapshot.playerModules) {
+        const ImVec4 barColor = !module.functional      ? color(200, 60, 50)
+                                : module.fraction < 0.6 ? color(220, 170, 60)
+                                                        : color(80, 170, 100);
+        ImGui::PushStyleColor(ImGuiCol_PlotHistogram, barColor);
+        const std::string percent = std::format("{:.0f}%", module.fraction * 100.0);
+        ImGui::ProgressBar(static_cast<float>(module.fraction), {70.0f, 0.0f}, percent.c_str());
+        ImGui::PopStyleColor();
+        ImGui::SameLine();
+        const bool isWeapon = module.type == ModuleType::Weapon && module.weapon < weapons.size();
+        const char* name = isWeapon ? weapons[module.weapon].name.c_str() : displayName(module.type);
+        if (!module.functional) {
+            ImGui::TextColored(color(255, 110, 100), "%s (fuera de servicio)", name);
+            continue;
+        }
+        if (!isWeapon) {
+            ImGui::TextUnformatted(name);
+            continue;
+        }
+        const FireSolution& fire = module.fire;
+        if (!fire.hasTarget) {
+            ImGui::Text("%s", name);
+        } else if (!fire.inRange) {
+            ImGui::Text("%s  ·  fuera de alcance (%s)", name,
+                        formatDistance(weapons[module.weapon].range).c_str());
+        } else if (!fire.locked) {
+            ImGui::TextColored(color(220, 170, 60), "%s  ·  sin fijación", name);
+        } else if (module.cooldown > 0.0) {
+            ImGui::TextColored(color(120, 255, 220), "%s  ·  recargando %.1f s", name, module.cooldown);
+        } else {
+            ImGui::TextColored(color(120, 255, 220), "%s  ·  fijado", name);
+        }
+    }
 }
 
 void GameApp::drawContactSelection(const ContactView& contact) {
@@ -564,6 +676,18 @@ void GameApp::drawContactSelection(const ContactView& contact) {
     ImGui::Text("Última detección: hace %.0f s", contact.ageSeconds);
     if (ImGui::Button("Ir a su posición estimada")) {
         submitPilot(FlightMode::MoveTo, {}, contact.position);
+    }
+    if (ImGui::Button("Interceptar")) {
+        submitEngage(contact.trackId, false, true);
+    }
+    ImGui::SameLine();
+    const ShipView* player = m_snapshot.findShip(sandbox().playerShip());
+    if (player != nullptr && player->fireTrack == contact.trackId) {
+        if (ImGui::Button("Alto el fuego (C)")) {
+            submitEngage(0, false, false);
+        }
+    } else if (ImGui::Button("Atacar (E)")) {
+        submitEngage(contact.trackId, true, true);
     }
     if (m_showTruth && contact.ghost) {
         ImGui::TextColored(color(255, 90, 200), "[depuración] contacto fantasma: no existe");
@@ -675,13 +799,7 @@ void GameApp::drawSensorsPanel() {
         for (const ContactView* contact : contacts) {
             ImGui::TableNextRow();
             ImGui::TableNextColumn();
-            std::string label =
-                contact->level == ContactLevel::Identified && !contact->name.empty()
-                    ? std::string(contact->name)
-                    : (contact->level == ContactLevel::Classified
-                           ? std::format("{}?", content::kShipClasses[contact->shipClass].name)
-                           : std::format("?{}", contact->trackId));
-            label += std::format("###contact{}", contact->trackId);
+            std::string label = contactLabel(*contact) + std::format("###contact{}", contact->trackId);
             if (ImGui::Selectable(label.c_str(), m_selectedContact == contact->trackId,
                                   ImGuiSelectableFlags_SpanAllColumns)) {
                 m_selectedContact = contact->trackId;
@@ -728,7 +846,17 @@ void GameApp::drawDebugPanel() {
                 static_cast<unsigned long long>(stats.steps),
                 static_cast<unsigned long long>(stats.eventsEmitted),
                 static_cast<unsigned long long>(stats.commandsApplied));
-    ImGui::Text("Vuelo (LOD): paso de %s", formatDuration(flight.desc.period).c_str());
+    ImGui::Text("Vuelo y combate (LOD): paso de %s", formatDuration(flight.desc.period).c_str());
+    const CombatStats& combat = sandbox().combat().stats();
+    const SandboxStats& game = sandbox().stats();
+    ImGui::Text("Combate: %llu disparos, %llu impactos, %llu naves destruidas",
+                static_cast<unsigned long long>(combat.shotsFired),
+                static_cast<unsigned long long>(combat.hits),
+                static_cast<unsigned long long>(combat.shipsDestroyed));
+    ImGui::Text(
+        "Piratas: %llu cacerías, %llu abatidos, %llu huidos  ·  cargueros perdidos: %llu",
+        static_cast<unsigned long long>(game.hunts), static_cast<unsigned long long>(game.piratesLost),
+        static_cast<unsigned long long>(game.piratesLeft), static_cast<unsigned long long>(game.haulersLost));
     ImGui::Text("Entidades: %u  ·  semilla %llu  ·  rechazados: %llu", simulation().world().entityCount(),
                 static_cast<unsigned long long>(m_config.seed),
                 static_cast<unsigned long long>(sandbox().stats().commandsRejected));
@@ -784,6 +912,8 @@ void GameApp::drawHelp() {
     ImGui::BulletText("Viajes largos: salto al hiperespacio fuera de los pozos gravitatorios (círculos)");
     ImGui::BulletText(
         "R: radar (ves más, pero te ven de lejos)   ·   T: transpondedor (difunde tu identidad)");
+    ImGui::BulletText("E: atacar el contacto seleccionado (lo persigue y dispara)   ·   C: alto el fuego");
+    ImGui::BulletText("Los piratas acechan junto a los pozos; cerca de las estaciones estás a salvo");
     ImGui::BulletText("H: seguir tu nave   ·   F: seguir la selección   ·   Esc: deseleccionar");
     ImGui::BulletText("F5: guardar   ·   F9: cargar   ·   F3: depuración   ·   F1: esta ayuda");
     ImGui::End();

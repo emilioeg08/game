@@ -5,6 +5,7 @@
 #include "Engine/Time/SimTime.h"
 #include "Simulation/World/EntityRegistry.h"
 #include "Space/Bodies/CelestialBody.h"
+#include "Space/Combat/Combat.h"
 #include "Space/Sensors/Sensors.h"
 #include "Space/Ships/Ship.h"
 
@@ -44,6 +45,42 @@ struct ShipView {
     Vec3d targetPosition; // where the autopilot is heading (valid for MoveTo/Approach)
     bool arrived = false;
     bool isPlayer = false;
+    u32 track = 0;       // Pursue: the sensor track followed
+    u32 fireTrack = 0;   // the sensor track its weapons fire at (0: holding fire)
+    f64 structure = 1.0; // hull integrity share
+    bool powered = true; // false: reactor out, drifting
+};
+
+// One module of the player's ship (the damage panel).
+struct ModuleView {
+    ModuleType type = ModuleType::Structure;
+    u32 weapon = 0;
+    f64 fraction = 1.0;
+    bool functional = true;
+    f64 cooldown = 0.0;
+    FireSolution fire; // weapons only
+};
+
+// Weapon fire and explosions. `visible`: close enough to the player to be seen (anything else is debug only).
+struct BeamView {
+    Vec3d from;
+    Vec3d to;
+    bool hit = false;
+    bool byPlayer = false;
+    bool visible = false;
+};
+
+struct ProjectileView {
+    Vec3d position;
+    Vec3d velocity;
+    bool byPlayer = false;
+    bool visible = false;
+};
+
+struct ExplosionView {
+    Vec3d position;
+    f64 ageSeconds = 0.0;
+    bool visible = false;
 };
 
 // A ship as the player's sensors see it (never the truth, except what has been identified).
@@ -67,9 +104,16 @@ struct SystemSnapshot {
     std::vector<BodyView> bodies;
     std::vector<ShipView> ships;       // ground truth: the client shows only its own fleet unless debugging
     std::vector<ContactView> contacts; // the player's sensor picture
+    std::vector<BeamView> beams;
+    std::vector<ProjectileView> projectiles;
+    std::vector<ExplosionView> explosions;
     u32 playerFaction = 0;
+    bool playerAlive = false;
+    f64 playerRespawnIn = 0.0; // s, while the player has no ship
     SensorSuite playerSensors; // the player's ship: radar/transponder switches
     f64 playerEmission = 0.0;  // how bright the player's ship is right now
+    std::vector<ModuleView> playerModules;
+    bool tactical = false; // fine flight/combat steps
 
     [[nodiscard]] const BodyView* findBody(EntityId id) const;
     [[nodiscard]] const ShipView* findShip(EntityId id) const;

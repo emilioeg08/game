@@ -226,3 +226,73 @@ sustituya y explique por qué.
   contacto significa ir a su *posición estimada*, no a la nave real.
 - **Coste:** O(observadores × objetivos de otras facciones) por escaneo (1 Hz). Con dos facciones es
   despreciable. Con muchas facciones hará falta partición espacial.
+
+## ADR-024 — Daño localizado por módulos; estadísticas derivadas
+
+- **Contexto:** prompt §12 y el editor de naves de las referencias, que muestra daño por módulo. Una sola
+  barra de vida no permite nada interesante: ni inutilizar sin destruir, ni huir con el motor tocado, ni
+  quedarse ciego.
+- **Decisión:**
+  - `ShipModules` es una lista de módulos (estructura, reactor, motor, hipermotor, sensores, armas, bodega,
+    habitáculo), cada uno con su salud. `ShipDesignStats` guarda el rendimiento de la nave intacta.
+  - `applyModuleEffects` recalcula `ShipDrive` y `SensorSuite` solo cuando cambian los módulos, nunca en
+    cada tick.
+  - `applyDamage` es una función pura con su propio flujo aleatorio: la estructura absorbe el 50 %, un
+    módulo elegido en proporción a su tamaño recibe el 100 %, por debajo del 10 % el módulo queda fuera de
+    servicio, y si el reactor queda fuera de servicio hay un 30 % de probabilidad de brecha.
+- **Consecuencias:** las naves se pueden inutilizar sin destruirlas (base para el abordaje y el botín de
+  M3), y el control de daños y las reparaciones son reglas de juego sobre salud de módulos. El formato de
+  guardado cambia: las partidas anteriores a M2.3 no cargan (se rechazan por componentes distintos, sin
+  corromper nada).
+
+## ADR-025 — Combate: se dispara a pistas de sensores; proyectiles simulados; mismo ritmo que el vuelo
+
+- **Contexto:** prompt §14 (sin omnisciencia). Si las armas apuntaran a entidades, los sensores no
+  servirían de nada en combate.
+- **Decisión:**
+  - `CombatControl.targetTrack` es un id de pista de la imagen de la facción. Para disparar hace falta
+    fijar la pista con los sensores propios (SNR ≥ 1). A un fantasma o a una pista perdida no se puede
+    disparar.
+  - El error de puntería es la medida (el mismo modelo que los sensores), más el error del arma, más la
+    aceleración real del blanco durante una latencia de 50 ms.
+  - Los haces son instantáneos. Los proyectiles se simulan en línea recta, con prueba de máxima
+    aproximación contra cada casco durante el paso, y pueden alcanzar a otra nave.
+  - `FlightMode::Pursue` sigue una pista extrapolada: el autopiloto persigue la estimación, no la nave.
+  - El combate corre justo después del vuelo y con su mismo periodo: 200 ms en modo estratégico y 50 ms en
+    táctico (con pilotaje manual, disparando, persiguiendo o tras recibir un impacto en los últimos 30 s).
+    Las posiciones se refieren así al mismo instante.
+  - Las naves destruidas se eliminan en `EventResolution` (`Space.Combat.Cleanup`), después de que todos
+    los suscriptores hayan visto `ShipDestroyed`.
+  - Los proyectiles forman parte del estado guardado. Los haces y explosiones recientes son solo
+    presentación.
+- **Alternativas descartadas:**
+  - Apuntar a la entidad y tirar un dado de acierto: sería omnisciente, y sin física.
+  - Proyectiles como entidades del mundo: con decenas en vuelo, un vector en el sistema es más simple y
+    más barato.
+- **Verificado:** los tests `Combat.*` cubren:
+  - el radar hace preciso el tiro a 700 km sobre un blanco silencioso (acierta más del 95 %; en pasivo,
+    menos del 20 %);
+  - un blanco que acelera esquiva los proyectiles a 2.000 km;
+  - sin fijación o fuera de alcance no hay disparos;
+  - guardar con un proyectil en vuelo y continuar da el mismo estado.
+- **Bug encontrado al medir:** si un impacto destruía el hipermotor durante la carga, la nave entraba en
+  hiperespacio a velocidad 0 y no salía nunca. Ahora perder el hipermotor aborta la carga y provoca una
+  salida de emergencia (test `Space.LosingTheHyperdriveAbortsAJump`).
+
+## ADR-026 — Piratas, reapariciones y mantenimiento del sistema
+
+- **Decisión:**
+  - La IA pirata es una máquina de estados simple (acecho, caza, huida) que solo lee la imagen de sensores
+    de su facción. Los parámetros viven en `Content.h`.
+  - Reparaciones, control de daños, reapariciones y salida de los piratas que huyen van en `Game.Upkeep`
+    (1 s, fase `EventResolution`, porque crea y destruye entidades).
+  - El sistema no es cerrado: los cargueros y los piratas perdidos se reponen con retraso, y el jugador
+    recibe una nave nueva en la estación principal.
+- **Mediciones que cambiaron el diseño:**
+  1. Con emboscadas en planetas elegidos al azar, los piratas pasaban la mayor parte del tiempo en
+     hiperespacio: hasta 20 UA, más de 40 minutos por viaje. Ahora eligen entre los 3 planetas más
+     cercanos.
+  2. Con el daño inicial, un corsario destruía al jugador en 5 s. Se redujo el daño unas 6 veces para
+     duelos de alrededor de un minuto.
+  3. Tres piratas persiguieron sin fin a una presa inalcanzable (el bug del hipermotor). Además del arreglo,
+     las cacerías caducan a los 3 minutos.

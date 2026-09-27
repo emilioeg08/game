@@ -21,19 +21,10 @@ constexpr f64 kGhostChance = 0.04; // per faction per scan
 constexpr f64 kClassifySnr = 4.0;
 constexpr f64 kPassiveIdentifySnr = 25.0;
 constexpr f64 kActiveIdentifySnr = 4.0;
-constexpr f64 kPassiveAngularError = 0.01; // 1-sigma position error as a fraction of range at SNR 1
-constexpr f64 kActiveAngularError = 0.0005;
 constexpr f64 kTransponderError = 1'000.0; // m: transponders report their own position
 
 u64 entityKey(EntityId entity) {
     return (static_cast<u64>(entity.generation) << 32) | entity.index;
-}
-
-// Per-axis uniform noise with the given standard deviation.
-Vec3d noise(Rng& rng, f64 sigma) {
-    const f64 halfWidth = sigma * 1.7320508075688772; // uniform on [-a, a] has sigma a/sqrt(3)
-    return {rng.uniform(-halfWidth, halfWidth), rng.uniform(-halfWidth, halfWidth),
-            rng.uniform(-halfWidth, halfWidth)};
 }
 
 struct ShipSnapshot {
@@ -100,6 +91,23 @@ f64 passiveDetectionRange(f64 emission, f64 sensitivity) {
     return std::sqrt(emission * sensitivity);
 }
 
+f64 measurementSigma(f64 distance, f64 passive, f64 active) {
+    f64 sigma = std::numeric_limits<f64>::infinity();
+    if (passive >= 0.25) {
+        sigma = std::min(sigma, distance * kPassiveAngularError / std::sqrt(passive));
+    }
+    if (active >= 0.25) {
+        sigma = std::min(sigma, distance * kActiveAngularError / std::sqrt(active));
+    }
+    return sigma;
+}
+
+Vec3d sensorNoise(Rng& rng, f64 sigma) {
+    const f64 halfWidth = sigma * 1.7320508075688772; // uniform on [-a, a] has sigma a/sqrt(3)
+    return {rng.uniform(-halfWidth, halfWidth), rng.uniform(-halfWidth, halfWidth),
+            rng.uniform(-halfWidth, halfWidth)};
+}
+
 void SensorSystem::registerTypes(Simulation& simulation) {
     simulation.world().registerComponent<SensorSuite>("Space.SensorSuite");
     simulation.world().registerComponent<SignatureProfile>("Space.SignatureProfile");
@@ -125,13 +133,11 @@ const FactionPicture& SensorSystem::picture(u32 faction) const {
 }
 
 const SensorContact* SensorSystem::findContact(u32 faction, u32 trackId) const {
-    const FactionPicture& contacts = picture(faction);
-    for (const SensorContact& contact : contacts.contacts) {
-        if (contact.trackId == trackId) {
-            return &contact;
-        }
-    }
-    return nullptr;
+    // Contacts are sorted by trackId (new tracks are appended with growing ids; losses keep the order).
+    const std::vector<SensorContact>& contacts = picture(faction).contacts;
+    const auto it = std::lower_bound(contacts.begin(), contacts.end(), trackId,
+                                     [](const SensorContact& c, u32 id) { return c.trackId < id; });
+    return it != contacts.end() && it->trackId == trackId ? &*it : nullptr;
 }
 
 FactionPicture& SensorSystem::pictureFor(u32 faction) {
@@ -233,12 +239,7 @@ void SensorSystem::update(const TickContext& context) {
                         : 0.0;
                 bestPassive = std::max(bestPassive, passive);
                 bestActive = std::max(bestActive, active);
-                if (passive >= 0.25) {
-                    bestSigma = std::min(bestSigma, distance * kPassiveAngularError / std::sqrt(passive));
-                }
-                if (active >= 0.25) {
-                    bestSigma = std::min(bestSigma, distance * kActiveAngularError / std::sqrt(active));
-                }
+                bestSigma = std::min(bestSigma, measurementSigma(distance, passive, active));
                 if (target.transponder && distance <= kTransponderRange) {
                     transponderHeard = true;
                     bestSigma = std::min(bestSigma, kTransponderError);
@@ -273,8 +274,8 @@ void SensorSystem::update(const TickContext& context) {
                 contactByTarget.emplace(entityKey(target.id), contactIndex);
             }
             SensorContact* contact = &picture.contacts[contactIndex];
-            contact->position = target.position + noise(rng, bestSigma);
-            contact->velocity = target.velocity + noise(rng, bestSigma / 10.0);
+            contact->position = target.position + sensorNoise(rng, bestSigma);
+            contact->velocity = target.velocity + sensorNoise(rng, bestSigma / 10.0);
             contact->uncertainty = bestSigma;
             contact->lastSeen = context.now;
             contact->level = std::max(contact->level, level); // what has been learned is not forgotten
@@ -308,9 +309,11 @@ void SensorSystem::update(const TickContext& context) {
             }
         }
 
-        // Loss of contact: tracks not refreshed recently are dropped (ghosts fade faster).
+        // Loss of contact: tracks not refreshed recently are dropped (ghosts fade faster). A destroyed ship's
+        // track ends at once: the explosion is seen by anyone who was tracking it.
         std::erase_if(picture.contacts, [&](const SensorContact& c) {
-            return context.now - c.lastSeen > (c.ghost ? kGhostLifetime : kContactTimeout);
+            return context.now - c.lastSeen > (c.ghost ? kGhostLifetime : kContactTimeout) ||
+                   (!c.ghost && !world.isAlive(c.target));
         });
     }
 }

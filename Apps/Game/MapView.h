@@ -55,6 +55,7 @@ private:
               const MapOptions& options);
     void drawContacts(ImDrawList& drawList, const SystemSnapshot& snapshot, const MapSelection& selected,
                       const MapSelection& hovered, const MapOptions& options);
+    void drawCombat(ImDrawList& drawList, const SystemSnapshot& snapshot, const MapOptions& options) const;
     void drawScaleBar(ImDrawList& drawList) const;
 
     Camera m_camera;
@@ -68,6 +69,9 @@ private:
 [[nodiscard]] const char* displayName(FlightMode mode);
 [[nodiscard]] const char* displayName(DrivePhase phase);
 [[nodiscard]] const char* displayName(ContactLevel level);
+[[nodiscard]] const char* displayName(ModuleType type);
+// Label of a contact as the player knows it: name when identified, class when classified, track otherwise.
+[[nodiscard]] std::string contactLabel(const ContactView& contact);
 [[nodiscard]] std::string formatDistance(f64 meters);
 [[nodiscard]] std::string formatSpeed(f64 metersPerSecond);
 

@@ -13,6 +13,7 @@
 
 namespace gx {
 
+class SensorSystem;
 class Simulation;
 class World;
 struct CelestialBody;
@@ -43,7 +44,8 @@ struct TargetState {
     i32 hostWell = -1; // innermost gravity well containing the target (index into the wells span), or -1
 };
 
-// Where a MoveTo/Approach ship is heading at `time`. Invalid if the target no longer exists.
+// Where a MoveTo/Approach ship is heading at `time`. Invalid if the target no longer exists, and for Pursue
+// (a sensor track: the flight system resolves it from the faction's picture).
 [[nodiscard]] TargetState resolveTarget(const World& world, const ShipControl& control, SimTime time);
 
 // Distance to keep from an Approach target: clear of a planet's surface, close to a station or a ship.
@@ -81,15 +83,18 @@ public:
 
     // Registers the system with the given period and returns its id (the period is a LOD knob).
     SystemId install(Simulation& simulation, SimDuration period);
+    // Source of sensor tracks for Pursue (without it pursuing ships hold position).
+    void setSensors(const SensorSystem* sensors) { m_sensors = sensors; }
     void update(const TickContext& context);
 
 private:
     // Absolute state of a body at the current step's state time, computed on first use and memoized for
     // the step: many ships share a few destinations, so each orbit is solved at most once per step.
     const OrbitState& bodyState(const World& world, EntityId body, SimTime time, int depth = 0);
-    TargetState resolveCached(const World& world, const ShipControl& control, SimTime time);
+    TargetState resolveCached(const World& world, EntityId ship, const ShipControl& control, SimTime time);
 
     u32 m_grain;
+    const SensorSystem* m_sensors = nullptr;
     std::vector<TargetState> m_targets; // reused between steps
     std::vector<GravityWell> m_wells;
     std::vector<OrbitState> m_bodyStates;

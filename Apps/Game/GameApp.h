@@ -17,7 +17,8 @@ struct SDL_Renderer;
 namespace gx {
 
 // Graphical client for the Sandbox vertical slice. The client owns presentation only: every change to the
-// simulation goes through PilotCommand, and it reads the simulation through SystemSnapshot.
+// simulation goes through commands (pilot, sensors, engage), and it reads the simulation through
+// SystemSnapshot.
 class GameApp {
 public:
     // Startup options, mostly for automated checks (render a few frames, capture, exit).
@@ -28,9 +29,10 @@ public:
         f64 prerunHours = 0.0;  // simulate before the first frame
         f64 metersPerPixel = 0.0;
         bool followStar = false;
-        bool select = false;    // select the player ship (shows the inspector)
-        bool showTruth = false; // debug omniscient view
-        i32 flyToPort = -1;     // order the player ship to this port (index in Sandbox::ports())
+        bool select = false;        // select the player ship (shows the inspector)
+        bool showTruth = false;     // debug omniscient view
+        i32 flyToPort = -1;         // order the player ship to this port (index in Sandbox::ports())
+        bool engageNearest = false; // after the prerun: attack the nearest contact and fight for 3 s
     };
 
     GameApp();
@@ -62,11 +64,13 @@ private:
     void submitPilot(FlightMode mode, EntityId target = {}, const Vec3d& point = {},
                      const Vec3d& thrust = {});
     void submitSensors(bool activeOn, bool transponderOn);
+    void submitEngage(u32 track, bool fire, bool pursue);
 
     void drawTimeBar();
     void drawShipPanel();
     void drawSelectionPanel();
     void drawContactSelection(const ContactView& contact);
+    void drawCombatSection(const ShipView& ship);
     void drawSensorsPanel();
     void drawJournal();
     void drawDebugPanel();
@@ -92,6 +96,7 @@ private:
     MapView m_map;
     InspectorView m_inspector;
     EntityId m_selected;
+    EntityId m_knownPlayer;    // to notice a replacement ship after the player's was destroyed
     u32 m_selectedContact = 0; // sensor track selected on the map (exclusive with m_selected)
     bool m_showTruth = false;  // debug: omniscient view
 

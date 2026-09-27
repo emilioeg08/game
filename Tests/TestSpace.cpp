@@ -312,3 +312,26 @@ GX_TEST(Space, InspectorListsNamedFields) {
     GX_EXPECT(has("Space.ShipControl/target=#7"));
     GX_EXPECT(has("Space.ShipControl/arrived=false"));
 }
+
+GX_TEST(Space, LosingTheHyperdriveAbortsAJump) {
+    // Regression: a hyperdrive wrecked while charging used to start a jump at zero speed that never ended.
+    const ShipDrive broken{50'000.0, 15'000'000.0, 0.0, 5.0};
+    const TargetState target{{1e12, 0.0, 0.0}, {}, true, -1};
+    ShipControl control;
+    control.mode = FlightMode::MoveTo;
+    control.point = target.position;
+    control.phase = DrivePhase::Charging;
+    control.chargeRemaining = 0.1;
+    Kinematics state;
+    FlightStepResult result = flyShip(control, state, broken, target, {}, 0.2);
+    GX_EXPECT(control.phase == DrivePhase::Sublight);
+    GX_EXPECT(!result.enteredHyperspace);
+    GX_EXPECT(length(state.velocity) > 0.0); // flying on sublight instead
+
+    control.phase = DrivePhase::Hyperspace;
+    state.velocity = {1.5e9, 0.0, 0.0};
+    result = flyShip(control, state, broken, target, {}, 0.2);
+    GX_EXPECT(result.leftHyperspace);
+    GX_EXPECT(control.phase == DrivePhase::Sublight);
+    GX_EXPECT(length(state.velocity) < 1e6); // dropped out, jump velocity dumped
+}

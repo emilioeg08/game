@@ -28,6 +28,10 @@ constexpr ImU32 kThrustColor = IM_COL32(255, 150, 70, 220);
 constexpr ImU32 kWellColor = IM_COL32(150, 110, 200, 70);
 constexpr ImU32 kTruthColor = IM_COL32(255, 90, 200, 150); // debug: real positions of other factions
 constexpr ImU32 kHyperspaceColor = IM_COL32(200, 160, 255, 200);
+constexpr ImU32 kTargetColor = IM_COL32(255, 70, 60, 255);
+constexpr ImU32 kPlayerFireColor = IM_COL32(120, 255, 220, 230);
+constexpr ImU32 kHostileFireColor = IM_COL32(255, 120, 60, 230);
+constexpr ImU32 kMissColor = IM_COL32(200, 200, 200, 70);
 constexpr f64 kSpeedOfLight = 299'792'458.0;
 
 struct BodyStyle {
@@ -105,6 +109,8 @@ const char* displayName(FlightMode mode) {
         return "Aproximación";
     case FlightMode::Manual:
         return "Pilotaje manual";
+    case FlightMode::Pursue:
+        return "Persecución";
     default:
         return "?";
     }
@@ -134,6 +140,21 @@ const char* displayName(ContactLevel level) {
     default:
         return "?";
     }
+}
+
+const char* displayName(ModuleType type) {
+    const auto index = static_cast<usize>(type);
+    return index < content::kModuleNames.size() ? content::kModuleNames[index] : "?";
+}
+
+std::string contactLabel(const ContactView& contact) {
+    if (contact.level == ContactLevel::Identified && !contact.name.empty()) {
+        return std::string(contact.name);
+    }
+    if (contact.level == ContactLevel::Classified) {
+        return std::format("{}? ({})", content::kShipClasses[contact.shipClass].name, contact.trackId);
+    }
+    return std::format("?{}", contact.trackId);
 }
 
 std::string formatDistance(f64 meters) {
@@ -319,6 +340,7 @@ void MapView::draw(const SystemSnapshot& snapshot, const MapSelection& selected,
     }
 
     drawContacts(drawList, snapshot, selected, hovered, options);
+    drawCombat(drawList, snapshot, options);
 
     // Own ships (and, when debugging, every ship where it really is): course line, thrust plume, hull
     // triangle pointing along the velocity.
@@ -349,6 +371,11 @@ void MapView::draw(const SystemSnapshot& snapshot, const MapSelection& selected,
             drawList.AddLine(center, toScreen(ship.targetPosition),
                              ship.isPlayer ? kCourseColor : kTruthColor, 1.0f);
         }
+        if (ship.isPlayer && ship.mode == FlightMode::Pursue) {
+            if (const ContactView* chased = snapshot.findContact(ship.track)) {
+                drawList.AddLine(center, toScreen(chased->position), kCourseColor, 1.0f);
+            }
+        }
         const f64 headingLength = length(ship.velocity);
         const ImVec2 forward = headingLength > 1.0
                                    ? ImVec2{static_cast<float>(ship.velocity.x / headingLength),
@@ -375,6 +402,9 @@ void MapView::draw(const SystemSnapshot& snapshot, const MapSelection& selected,
         if (ship.isPlayer || isSelected || isHovered || (own && mpp < 2'000.0)) {
             addText(drawList, {center.x + size + 4.0f, center.y + 2.0f}, color, ship.name);
         }
+        if (!ship.powered && (own || options.showTruth)) {
+            addText(drawList, {center.x + size + 4.0f, center.y + 16.0f}, kTargetColor, "sin energía");
+        }
     }
 
     drawScaleBar(drawList);
@@ -383,6 +413,12 @@ void MapView::draw(const SystemSnapshot& snapshot, const MapSelection& selected,
 void MapView::drawContacts(ImDrawList& drawList, const SystemSnapshot& snapshot, const MapSelection& selected,
                            const MapSelection& hovered, const MapOptions& options) {
     const f64 mpp = m_camera.metersPerPixel;
+    u32 fireTrack = 0;
+    for (const ShipView& ship : snapshot.ships) {
+        if (ship.isPlayer) {
+            fireTrack = ship.fireTrack;
+        }
+    }
     for (const ContactView& contact : snapshot.contacts) {
         const ImVec2 center = toScreen(contact.position);
         // Fresh tracks are bright; stale ones fade until they are lost.
@@ -408,18 +444,66 @@ void MapView::drawContacts(ImDrawList& drawList, const SystemSnapshot& snapshot,
         if (isSelected || hovered.contact == contact.trackId) {
             drawList.AddCircle(center, kSize + 5.0f, isSelected ? kSelectionColor : kDimText, 0, 1.5f);
         }
-        std::string label;
-        if (contact.level == ContactLevel::Identified && !contact.name.empty()) {
-            label = std::string(contact.name);
-        } else if (contact.level == ContactLevel::Classified) {
-            label = std::format("{}?", content::kShipClasses[contact.shipClass].name);
-        } else {
-            label = std::format("?{}", contact.trackId);
+        if (contact.trackId == fireTrack) {
+            // The player's weapons are on this track: a reticle.
+            constexpr float kReticle = 13.0f;
+            drawList.AddCircle(center, kReticle, kTargetColor, 0, 1.5f);
+            drawList.AddLine({center.x - kReticle - 5.0f, center.y}, {center.x - kReticle + 4.0f, center.y},
+                             kTargetColor, 1.5f);
+            drawList.AddLine({center.x + kReticle - 4.0f, center.y}, {center.x + kReticle + 5.0f, center.y},
+                             kTargetColor, 1.5f);
+            drawList.AddLine({center.x, center.y - kReticle - 5.0f}, {center.x, center.y - kReticle + 4.0f},
+                             kTargetColor, 1.5f);
+            drawList.AddLine({center.x, center.y + kReticle - 4.0f}, {center.x, center.y + kReticle + 5.0f},
+                             kTargetColor, 1.5f);
         }
+        std::string label = contactLabel(contact);
         if (options.showTruth && contact.ghost) {
             label += " [fantasma]";
         }
         addText(drawList, {center.x + kSize + 4.0f, center.y - 7.0f}, color, label);
+    }
+}
+
+void MapView::drawCombat(ImDrawList& drawList, const SystemSnapshot& snapshot,
+                         const MapOptions& options) const {
+    // Beams: bright while they connect, faint when they miss. Only fire the player could see, unless
+    // debugging.
+    for (const BeamView& beam : snapshot.beams) {
+        if (!beam.visible && !options.showTruth) {
+            continue;
+        }
+        const ImU32 color = !beam.hit ? kMissColor : (beam.byPlayer ? kPlayerFireColor : kHostileFireColor);
+        drawList.AddLine(toScreen(beam.from), toScreen(beam.to), color, beam.hit ? 2.0f : 1.0f);
+    }
+    // Slugs: a dot with a short streak along their motion (a fixed number of pixels: they are too fast).
+    for (const ProjectileView& projectile : snapshot.projectiles) {
+        if (!projectile.visible && !options.showTruth) {
+            continue;
+        }
+        const ImVec2 at = toScreen(projectile.position);
+        const f64 speed = length(projectile.velocity);
+        const ImU32 color = projectile.byPlayer ? kPlayerFireColor : kHostileFireColor;
+        if (speed > 0.0) {
+            const ImVec2 back{static_cast<float>(-projectile.velocity.x / speed),
+                              static_cast<float>(projectile.velocity.y / speed)};
+            drawList.AddLine(at, {at.x + back.x * 12.0f, at.y + back.y * 12.0f}, color, 1.5f);
+        }
+        drawList.AddCircleFilled(at, 2.0f, color);
+    }
+    // Explosions: an expanding, fading ring.
+    for (const ExplosionView& explosion : snapshot.explosions) {
+        if (!explosion.visible && !options.showTruth) {
+            continue;
+        }
+        const f64 life = CombatSystem::kExplosionVisibleFor.toSeconds();
+        const f64 progress = std::clamp(explosion.ageSeconds / life, 0.0, 1.0);
+        const auto alpha = static_cast<u8>(255.0 * (1.0 - progress));
+        const ImVec2 at = toScreen(explosion.position);
+        drawList.AddCircleFilled(at, static_cast<float>(4.0 + 6.0 * (1.0 - progress)),
+                                 IM_COL32(255, 230, 160, alpha));
+        drawList.AddCircle(at, static_cast<float>(6.0 + 30.0 * progress), IM_COL32(255, 150, 60, alpha), 0,
+                           2.0f);
     }
 }
 

@@ -6,12 +6,14 @@
 > (`Game/Sandbox/Content.h`) o en parámetros de generación, no dispersos por los sistemas, para que moverlos
 > a ficheros de datos (modding) sea un cambio local.
 
-## Estado: slice M2.1 "Sistema estelar jugable"
+## Estado: slice M2.3 "Combate y daño por módulos"
 
 Se puede: empezar una partida en un sistema generado, pilotar la nave (autopiloto con salto al
 hiperespacio, o empuje manual), ver a los cargueros NPC viajar solos entre puertos, jugar en tiempo real
-con aceleración ×3 o ×10, guardar y cargar, e inspeccionar cualquier entidad, con **sensores y niebla de guerra** (M2.2). **Todavía no hay:** combate, daño, economía jugable,
-facciones políticas ni más de un sistema estelar (slices M2.2 en adelante).
+con aceleración ×3 o ×10, guardar y cargar, e inspeccionar cualquier entidad, con **sensores y niebla de
+guerra** (M2.2) y **combate** (M2.3): armas que disparan a pistas de sensores, daño por módulos, piratas
+que cazan cargueros, reparaciones y reapariciones. **Todavía no hay:** economía jugable, misiles ni defensa
+puntual, facciones políticas ni más de un sistema estelar.
 
 ## Escala, unidades y tiempo
 
@@ -71,6 +73,7 @@ facciones políticas ni más de un sistema estelar (slices M2.2 en adelante).
 |---|---|---|---|---|---|
 | Correo | nave del jugador | 50 km/s² / 15.000 km/s | 1.500.000 km/s (5 c) | 5 s | ~100 s |
 | Carguero | transporte NPC | 15 km/s² / 6.000 km/s | 600.000 km/s (2 c) | 12 s | ~250 s |
+| Corsario | pirata NPC | 40 km/s² / 12.000 km/s | 1.200.000 km/s (4 c) | 6 s | ~125 s |
 
 Las referencias muestran velocidades sublumínicas de ~20.000 km/s y velocidades de hiperespacio de más de
 un millón de km/s. Con ×1 = tiempo real, un viaje entre planetas dura de 3 a 6 minutos a ×1 (menos de un
@@ -96,21 +99,91 @@ minuto a ×10).
 |---|---|---|---|---|---|
 | Correo | 1e3 | +1e6 | 1e3 m² | 1e12 | sí |
 | Carguero | 5e3 | +2e6 | 1e4 m² | 5e11 | no |
+| Corsario | 2e3 | +1,5e6 | 3e3 m² | 1e12 | sí |
+
+## Combate (ADR-024, ADR-025)
+
+**Módulos.** Una nave no es una barra de vida, sino un conjunto de módulos con su propia salud (como en el
+editor de naves de las referencias). La estructura va primero: si llega a cero, la nave se destruye.
+
+| Diseño | Estructura | Reactor | Motor | Hipermotor | Sensores | Armas | Otros |
+|---|---|---|---|---|---|---|---|
+| Correo | 500 | 150 | 150 | 120 | 100 | láser 80, riel 80 | habitáculo 80 |
+| Carguero | 600 | 150 | 200 | 150 | 80 | — | bodega 600, habitáculo 150 |
+| Corsario | 400 | 120 | 150 | 120 | 80 | 2 láseres 80, riel 80 | habitáculo 80 |
+
+**Daño.**
+
+- Cada impacto hace dos cosas: la estructura absorbe la mitad, y un módulo elegido al azar en proporción
+  a su tamaño recibe el impacto completo. Si ese módulo ya está destrozado, su parte pasa a la estructura.
+- Por debajo del 10 % un módulo queda fuera de servicio.
+- Sin reactor, la nave queda **sin energía**: no tiene motor, ni hipermotor, ni armas, ni radar, y va a la
+  deriva.
+- Cuando el reactor queda fuera de servicio, hay un 30 % de probabilidad de brecha, que destruye la nave.
+- Motor y sensores escalan con su salud. El hipermotor no funciona por debajo del 50 %, y un salto en curso
+  se aborta si se pierde.
+
+**Armas.**
+
+| Arma | Tipo | Alcance | Daño | Notas |
+|---|---|---|---|---|
+| Láser | haz (instantáneo) | 800 km | 4 por segundo en el blanco | acierta si el error de puntería es menor que el casco |
+| Cañón de riel | proyectil a 5.000 km/s | 3.000 km | 15 por impacto | recarga de 2 s; el proyectil vuela en línea recta |
+
+**Control de tiro.**
+
+- Se dispara a **pistas de sensores**, no a naves.
+- Para disparar hace falta que tu facción tenga el contacto y que tus propios sensores lo fijen (SNR ≥ 1).
+  A un fantasma no se le puede disparar.
+- El error de puntería suma tres cosas: el error de medida (d/√SNR, pequeño con radar), el error del arma,
+  y lo que el blanco acelera durante la latencia del control de tiro (50 ms).
+- Un Correo que acelera a fondo esquiva parte de los láseres. Los proyectiles se apuntan suponiendo
+  velocidad constante, así que a largo alcance una nave que acelera los esquiva.
+- El daño está ajustado para que un duelo dure alrededor de un minuto a ×1. Da tiempo para huir, maniobrar
+  o apagar el radar. Medido: un corsario destruye al Correo, que no responde, en 52 s.
+
+**Reparaciones y pérdidas.**
+
+- Atracado en una **estación**, todo se repara al 2 % por segundo.
+- Fuera de puerto, el control de daños lleva el reactor y el motor hasta el 25 %, a 0,25 % por segundo,
+  tras 10 s sin recibir impactos. Un reactor destrozado vuelve a dar energía en unos 50 s.
+- Si destruyen tu nave, a los 10 s te espera una nueva en la estación principal.
+- Los cargueros perdidos se reponen al ritmo de uno por minuto, y los piratas de uno cada 3 minutos (el
+  sistema no es una caja cerrada).
 
 ## Facciones y personajes (mínimo)
 
-- **Jugador** (verde) y **Transportistas independientes** (azul). La política, las Casas y los títulos
-  llegarán en la fase 5.
-- Nave del jugador: "Errante" (Correo). Cargueros: nombre + número ("Faro-12", "Nómada-47").
+- **Jugador** (verde), **Transportistas independientes** (azul) y **Piratas** (rojo). La política, las
+  Casas y los títulos llegarán en la fase 5.
+- Nave del jugador: "Errante" (Correo). Cargueros: nombre + número ("Faro-12", "Nómada-47"). Corsarios:
+  "Colmillo-66", "Sombra-86"...
 
-## Comportamiento de los NPC (cargueros)
+## Comportamiento de los NPC
 
 - Regla simple y reproducible, sin LLM (prompt §16): esperar en puerto de 30 s a 3 min, elegir **otro** puerto
   al azar (flujo aleatorio por nave y viaje), volar (con salto) y atracar, y repetir.
 - La galaxia actúa sin el jugador: los cargueros viajan y atracan aunque el jugador no haga nada, y cada
   llegada queda en el diario.
+- Un carguero atacado huye a la estación más cercana, donde los piratas no se atreven a entrar.
 - Próximo paso (M3, economía): los destinos dependerán de oferta, demanda y precios (utility AI) y la carga
   será real.
+
+**Piratas (ADR-026).** Deciden solo con la imagen de sensores de su facción, nunca con la verdad:
+
+- **Acecho:** esperan justo fuera del pozo de un planeta, que es donde los cargueros salen del
+  hiperespacio. Van en silencio (sin transpondedor ni radar) y cada 4 minutos cambian a uno de los 3
+  planetas más cercanos.
+- **Caza:** eligen la pista clasificada más cercana, siempre que no sea un corsario y esté a menos de
+  300.000 km. Descartan las pistas en hiperespacio y las que están a menos de 50.000 km de una estación.
+  Encienden el radar, persiguen la pista a 200 km y disparan.
+- **Abandono de la caza:** abandonan si pierden la pista, si la presa se aleja más de 600.000 km o llega a
+  una estación, o a los 3 minutos (y entonces descartan esa pista).
+- **Huida:** con la estructura por debajo del 40 % o sin armas, salen del sistema por las afueras y
+  desaparecen de la simulación.
+- El jugador con el transpondedor encendido es tan presa como un carguero. Apagarlo y no acelerar cerca de
+  los pozos es la forma de pasar desapercibido.
+- **Medido** (3 h, 12 cargueros, 3 piratas, 4 semillas): de 30 a 61 cacerías y de 3 a 7 cargueros
+  perdidos. Es decir, uno o dos por hora.
 
 ## Controles del cliente
 
@@ -123,6 +196,9 @@ minuto a ×10).
 | Empuje manual | W A S D (arriba = +y del mapa) |
 | Frenar | X |
 | Radar / transpondedor | R / T |
+| Atacar el contacto seleccionado (lo persigue a 300 km y dispara) | E |
+| Alto el fuego | C |
+| Interceptar sin disparar | botón en la selección del contacto |
 | Pausa / velocidad | Espacio / 1 (×1), 2 (×3), 3 (×10) |
 | Seguir tu nave / la selección | H / F |
 | Guardar / cargar | F5 / F9 |
@@ -132,14 +208,21 @@ minuto a ×10).
 
 - Mapa 2D oscuro con órbitas tenues, colores por tipo de cuerpo, triángulos orientados por la velocidad
   para las naves, llama de empuje, línea de rumbo, barra de escala en km o UA, y etiquetas según el zoom.
-- Paneles: tiempo (arriba), nave (izquierda), selección con inspector (derecha), diario (abajo a la
+- Paneles: tiempo (arriba), nave (izquierda, con barras de salud por módulo y estado de cada arma: fijado,
+  sin fijación, fuera de alcance o recargando), selección con inspector (derecha), diario (abajo a la
   izquierda) y depuración (F3).
+- Combate: los haces son cian (los tuyos) o naranjas (hostiles), y tenues cuando fallan. Los proyectiles
+  son puntos con estela, y las explosiones, anillos que se expanden. El blanco de tus armas lleva una
+  retícula roja. Solo ves el fuego a menos de 10.000 km de tu nave y las explosiones a menos de 5 millones
+  de km, salvo en la vista de depuración.
 - Referencias: solo conceptuales. La interfaz, los nombres y los assets son originales.
 
 ## Pendiente de decidir (para `game.md` o para próximos slices)
 
 1. Consecuencias de apagar el transpondedor (ley, reputación) y guerra electrónica.
-2. Armas, defensa puntual, misiles y daño por módulos (M2.3–M2.4, según las referencias del editor de nave).
+2. Misiles, defensa puntual, blindaje o escudos, y abordaje con botín (cuando exista la carga, M3).
+6. Consecuencias de atacar a cargueros o a otras facciones: reputación, policía de las estaciones y
+   recompensas por piratas.
 3. Bienes, producción y precios de los puertos (M3).
 4. Hiperespacio o viaje entre sistemas y la estructura de la galaxia.
 5. Nombre del juego, tono y estética definitiva.

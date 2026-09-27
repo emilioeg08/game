@@ -31,7 +31,7 @@ depurabilidad → moddabilidad → presentación.
  Game/     Sandbox (escenario jugable) · Presentation (SystemSnapshot) · contenido provisional
  Scenarios/                                              cargas sintéticas (NO contenido de juego)
         │
- Space/    Orbits · Bodies · Ships (vuelo) · Generation  dominio espacial
+ Space/    Orbits · Bodies · Ships · Sensors · Combat · Generation  dominio espacial
         │
  Simulation/  Kernel · World · Events · Commands          estado autoritativo y bucle de pasos
         │
@@ -64,8 +64,9 @@ Reglas:
 | `Simulation/Commands` | `CommandQueue` (entrada externa serializada, grabación para replay) |
 | `Space/Orbits` | órbitas keplerianas analíticas (solver de Kepler con Newton protegido) |
 | `Space/Bodies` | `CelestialBody`, `OrbitsParent`, estado absoluto por la cadena de padres |
-| `Space/Ships` | componentes de nave, autopiloto (`steer`), `FlightSystem` (dos pases, eventos `ShipArrived`) |
+| `Space/Ships` | componentes de nave, autopiloto (`steer`), `FlightSystem` (dos pases, eventos `ShipArrived`), módulos y daño (`ShipModules`, `applyDamage`, `applyModuleEffects`) |
 | `Space/Sensors` | firmas, detección pasiva y activa, transpondedor, imagen de sensores por facción (`SensorSystem`) |
+| `Space/Combat` | armas (haz y proyectil), control de tiro sobre pistas de sensores, proyectiles, `ShipDamaged` / `ShipDestroyed` y retirada de naves destruidas (`CombatSystem`) |
 | `Space/Generation` | generación procedural del sistema estelar (datos puros) y creación de entidades |
 | `Game/Sandbox` | escenario jugable: jugador, cargueros NPC, `PilotCommand`, diario, LOD de vuelo |
 | `Game/Presentation` | `SystemSnapshot`: foto de solo lectura para el cliente |

@@ -1,4 +1,5 @@
-// Headless simulation runner: simulates the synthetic galaxy without any renderer or UI.
+// Headless simulation runner: simulates the synthetic galaxy (or, with --sandbox, the playable star system)
+// without any renderer or UI.
 // Unpaced by default (as fast as possible); --speed paces it against the wall clock like interactive play.
 // Also the first save tool: --save/--load continue a campaign, --inspect describes a save file, and
 // --record/--replay verify that a recorded command sequence reproduces the same final state.
@@ -13,6 +14,8 @@
 #include "Engine/Serialization/SaveFile.h"
 #include "Engine/Time/Stopwatch.h"
 #include "Engine/Time/TimeController.h"
+#include "Game/Sandbox/Content.h"
+#include "Game/Sandbox/Sandbox.h"
 #include "Scenarios/SyntheticGalaxy.h"
 #include "Simulation/Kernel/Simulation.h"
 
@@ -48,6 +51,13 @@ struct Options {
     std::string replayPath;
     bool profile = true;
     LogLevel logLevel = LogLevel::Info;
+    // --sandbox: the playable slice (star system, haulers, pirates) instead of the synthetic galaxy.
+    bool sandbox = false;
+    u32 minutes = 60;
+    u32 haulers = 12;
+    u32 pirates = 3;
+    i32 flyTo = -1;       // order the player's ship to this port at the start
+    bool journal = false; // print the game journal at the end
 };
 
 void printUsage() {
@@ -68,6 +78,10 @@ void printUsage() {
                 "  --replay <file>     re-run a recording and verify the final state hash\n"
                 "  --trace <file>      write a Chrome/Perfetto trace (https://ui.perfetto.dev)\n"
                 "  --no-profile        disable profiling zones\n"
+                "  --sandbox           run the playable star system instead (with --seed, --minutes,\n"
+                "                      --haulers, --pirates): combat and traffic statistics\n"
+                "  --fly-to <i>        sandbox: send the player's ship to port i at the start\n"
+                "  --journal           sandbox: print the game journal at the end\n"
                 "  --log-level <lvl>   trace|debug|info|warn|error (default info)\n");
 }
 
@@ -120,6 +134,18 @@ int parseOptions(int argc, char** argv, Options& options) {
             ok = path(options.replayPath);
         } else if (arg == "--trace") {
             ok = path(options.tracePath);
+        } else if (arg == "--sandbox") {
+            options.sandbox = true;
+        } else if (arg == "--minutes") {
+            ok = parseNumber(value(), options.minutes) && options.minutes > 0;
+        } else if (arg == "--haulers") {
+            ok = parseNumber(value(), options.haulers);
+        } else if (arg == "--pirates") {
+            ok = parseNumber(value(), options.pirates);
+        } else if (arg == "--fly-to") {
+            ok = parseNumber(value(), options.flyTo) && options.flyTo >= 0;
+        } else if (arg == "--journal") {
+            options.journal = true;
         } else if (arg == "--no-profile") {
             options.profile = false;
         } else if (arg == "--log-level") {
@@ -251,6 +277,99 @@ void runPaced(Simulation& simulation, const SyntheticGalaxy& galaxy, SimTime end
     }
 }
 
+// The playable slice, unpaced: traffic and combat statistics every tenth of the run (balance and cost).
+int runSandbox(const Options& options) {
+    JobSystem jobs(options.threads - 1);
+    SandboxConfig config;
+    config.seed = options.seed;
+    config.haulers = options.haulers;
+    config.pirates = options.pirates;
+    Sandbox sandbox(config);
+    Simulation simulation(Simulation::Config{.seed = config.seed}, jobs);
+    sandbox.install(simulation);
+    sandbox.populate(simulation);
+    GX_LOG_INFO(kChannel, "sandbox | system {} | seed {} | {} haulers, {} pirates | {} minutes",
+                sandbox.systemName(), config.seed, config.haulers, config.pirates, options.minutes);
+    if (options.flyTo >= 0 && static_cast<usize>(options.flyTo) < sandbox.ports().size()) {
+        simulation.submitCommand(PilotCommand{sandbox.playerShip(),
+                                              FlightMode::Approach,
+                                              sandbox.ports()[static_cast<usize>(options.flyTo)],
+                                              {},
+                                              {}});
+    }
+
+    const Stopwatch wall;
+    const SimTime end = simulation.now() + SimDuration::minutes(options.minutes);
+    const SimDuration report = SimDuration::minutes(std::max<u32>(1, options.minutes / 10));
+    while (simulation.now() < end) {
+        simulation.runUntil(std::min(end, simulation.now() + report));
+        const SandboxStats& stats = sandbox.stats();
+        const CombatStats& combat = sandbox.combat().stats();
+        const World& world = simulation.world();
+        GX_LOG_INFO(
+            kChannel,
+            "{} | haulers {:>3} | pirates {:>2} | hunts {:>3} | shots {:>6} hits {:>6} | lost: haulers {:>2} "
+            "pirates {:>2} fled {:>2} player {} | x{:.0f}",
+            formatSimTime(simulation.now(), content::kEpochYear), world.components<HaulerBrain>().size(),
+            world.components<PirateBrain>().size(), stats.hunts, combat.shotsFired, combat.hits,
+            stats.haulersLost, stats.piratesLost, stats.piratesLeft, stats.playerDeaths,
+            (simulation.now() - SimTime::epoch()).toSeconds() / std::max(wall.elapsedSeconds(), 1e-9));
+    }
+    const World& world = simulation.world();
+    const ComponentStore<PirateBrain>& pirates = world.components<PirateBrain>();
+    for (usize i = 0; i < pirates.size(); ++i) {
+        const EntityId ship = pirates.entities()[i];
+        const ShipControl& control = world.components<ShipControl>().get(ship);
+        const ShipModules& modules = world.components<ShipModules>().get(ship);
+        const Kinematics& state = world.components<Kinematics>().get(ship);
+        std::printf(
+            "  pirate %-12s %-8s mode %-8s phase %-10s arrived %d track %u fire %u structure %.0f%% "
+            "power %d speed %.0f km/s | to point %.3e m, from star %.3e m, heading %.3f\n",
+            world.components<ShipIdentity>().get(ship).name.c_str(), toString(pirates.values()[i].state),
+            toString(control.mode), toString(control.phase), control.arrived ? 1 : 0, control.track,
+            world.components<CombatControl>().get(ship).targetTrack, structureOf(modules)->fraction() * 100.0,
+            hasPower(modules) ? 1 : 0, length(state.velocity) / 1000.0,
+            length(control.point - state.position), length(state.position),
+            dot(state.velocity / std::max(length(state.velocity), 1e-9),
+                (control.point - state.position) / std::max(length(control.point - state.position), 1e-9)));
+        // Debug truth: what the track really is.
+        const SensorContact* contact = sandbox.sensors().findContact(content::kFactionPirates, control.track);
+        if (contact != nullptr && world.isAlive(contact->target)) {
+            const EntityId prey = contact->target;
+            const ShipControl& preyControl = world.components<ShipControl>().get(prey);
+            const ShipModules& preyModules = world.components<ShipModules>().get(prey);
+            std::printf(
+                "      prey %-12s mode %-8s arrived %d speed %.1f km/s structure %.0f%% power %d at %.0f km, "
+                "level %s, lastSeen %.0f s ago\n",
+                world.components<ShipIdentity>().get(prey).name.c_str(), toString(preyControl.mode),
+                preyControl.arrived ? 1 : 0, length(world.components<Kinematics>().get(prey).velocity) / 1e3,
+                structureOf(preyModules)->fraction() * 100.0, hasPower(preyModules) ? 1 : 0,
+                length(world.components<Kinematics>().get(prey).position - state.position) / 1e3,
+                toString(contact->level), (simulation.now() - contact->lastSeen).toSeconds());
+        } else if (control.track != 0) {
+            std::printf("      prey: track %u %s\n", control.track,
+                        contact == nullptr ? "lost" : (contact->ghost ? "is a ghost" : "target gone"));
+        }
+    }
+    if (options.journal) {
+        for (const JournalEntry& entry : sandbox.journal()) {
+            std::printf("  %s  %s\n", formatSimTime(entry.time, content::kEpochYear).c_str(),
+                        entry.text.c_str());
+        }
+    }
+    const SandboxStats& stats = sandbox.stats();
+    std::printf("sandbox: %llu departures, %llu arrivals, %llu hunts, %llu haulers lost, %llu pirates lost, "
+                "%llu pirates fled, %llu player deaths, final hash %016llx\n",
+                static_cast<unsigned long long>(stats.haulerDepartures),
+                static_cast<unsigned long long>(stats.arrivals), static_cast<unsigned long long>(stats.hunts),
+                static_cast<unsigned long long>(stats.haulersLost),
+                static_cast<unsigned long long>(stats.piratesLost),
+                static_cast<unsigned long long>(stats.piratesLeft),
+                static_cast<unsigned long long>(stats.playerDeaths),
+                static_cast<unsigned long long>(simulation.stateHash()));
+    return 0;
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
@@ -262,6 +381,10 @@ int main(int argc, char** argv) {
     logging::setLevel(options.logLevel);
     if (!options.inspectPath.empty()) {
         return inspectSave(options.inspectPath);
+    }
+    if (options.sandbox) {
+        profiling::setEnabled(options.profile);
+        return runSandbox(options);
     }
 
     Recording replay;

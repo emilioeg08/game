@@ -177,14 +177,16 @@ void benchGrain(Report& report, const Options& options) {
 }
 
 void benchSandbox(Report& report, const Options& options) {
-    section("sim.sandbox (playable slice at real-time scale: player + haulers, flight every 200 ms)");
+    section("sim.sandbox (playable slice at real-time scale: player, haulers and pirates (1 per 20 haulers, "
+            "at least 3); flight and combat every 200 ms)");
     const u32 hours = options.quick ? 1 : 3;
-    std::printf("%8s %8s %10s %10s %10s %16s\n", "haulers", "threads", "steps", "wall ms", "us/step",
-                "x real time max");
+    std::printf("%8s %8s %8s %10s %10s %10s %16s %8s %8s\n", "haulers", "pirates", "threads", "steps",
+                "wall ms", "us/step", "x real time max", "shots", "lost");
     for (const u32 haulers : {12u, 200u, 2000u}) {
         for (const u32 threads : {1u, options.threads}) {
             SandboxConfig config;
             config.haulers = haulers;
+            config.pirates = std::max(3u, haulers / 20);
             JobSystem jobs(threads - 1);
             Sandbox sandbox(config);
             Simulation simulation(Simulation::Config{.seed = config.seed}, jobs);
@@ -199,10 +201,15 @@ void benchSandbox(Report& report, const Options& options) {
             const u64 steps = simulation.stepCount() - stepsBefore;
             const f64 usPerStep = wallMs * 1000.0 / static_cast<f64>(steps);
             const f64 realTimeFactor = static_cast<f64>(hours) * 3'600'000.0 / wallMs;
-            std::printf("%8u %8u %10llu %10.1f %10.2f %16.0f\n", haulers, threads,
-                        static_cast<unsigned long long>(steps), wallMs, usPerStep, realTimeFactor);
+            const u64 shots = sandbox.combat().stats().shotsFired;
+            const u64 lost = sandbox.stats().haulersLost;
+            std::printf("%8u %8u %8u %10llu %10.1f %10.2f %16.0f %8llu %8llu\n", haulers, config.pirates,
+                        threads, static_cast<unsigned long long>(steps), wallMs, usPerStep, realTimeFactor,
+                        static_cast<unsigned long long>(shots), static_cast<unsigned long long>(lost));
             std::fflush(stdout);
             report.add("sim.sandbox", {{"haulers", Report::integer(haulers)},
+                                       {"pirates", Report::integer(config.pirates)},
+                                       {"shots", Report::integer(shots)},
                                        {"threads", Report::integer(threads)},
                                        {"steps", Report::integer(steps)},
                                        {"wall_ms", Report::number(wallMs)},

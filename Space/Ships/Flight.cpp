@@ -4,6 +4,7 @@
 #include "Engine/Profiling/Profiler.h"
 #include "Simulation/Kernel/Simulation.h"
 #include "Space/Bodies/CelestialBody.h"
+#include "Space/Sensors/Sensors.h"
 
 #include <algorithm>
 #include <cmath>
@@ -55,6 +56,8 @@ const char* toString(FlightMode mode) {
         return "Approach";
     case FlightMode::Manual:
         return "Manual";
+    case FlightMode::Pursue:
+        return "Pursue";
     case FlightMode::Count:
         break;
     }
@@ -159,6 +162,7 @@ Vec3d steer(ShipControl& control, const Kinematics& kinematics, const ShipDrive&
         return clampLength(control.manualThrust, 1.0) * maxAcceleration;
     case FlightMode::MoveTo:
     case FlightMode::Approach:
+    case FlightMode::Pursue:
         break;
     }
 
@@ -172,7 +176,7 @@ Vec3d steer(ShipControl& control, const Kinematics& kinematics, const ShipDrive&
     const Vec3d offset = target.position - kinematics.position;
     const Vec3d relativeVelocity = kinematics.velocity - target.velocity;
     const f64 distance = length(offset);
-    const f64 standoff = control.mode == FlightMode::Approach ? control.standoff : 0.0;
+    const f64 standoff = control.mode == FlightMode::MoveTo ? 0.0 : control.standoff;
     const f64 gap = distance - standoff; // negative: inside the standoff sphere, back off
     const Vec3d direction = distance > 1e-6 ? offset / distance : Vec3d{};
 
@@ -183,7 +187,8 @@ Vec3d steer(ShipControl& control, const Kinematics& kinematics, const ShipDrive&
         clampLength((desiredRelativeVelocity - relativeVelocity) / dt, maxAcceleration);
 
     const f64 tolerance = std::max(kMinArrivalTolerance, 0.01 * standoff);
-    if (!control.arrived && std::abs(gap) < tolerance && length(relativeVelocity) < kArrivalSpeedTolerance) {
+    if (!control.arrived && control.mode != FlightMode::Pursue && std::abs(gap) < tolerance &&
+        length(relativeVelocity) < kArrivalSpeedTolerance) {
         control.arrived = true;
         arrivedNow = true;
     }
@@ -193,10 +198,13 @@ Vec3d steer(ShipControl& control, const Kinematics& kinematics, const ShipDrive&
 FlightStepResult flyShip(ShipControl& control, Kinematics& kinematics, const ShipDrive& drive,
                          const TargetState& target, std::span<const GravityWell> wells, f64 dt) {
     FlightStepResult result;
-    const bool autopilot = control.mode == FlightMode::MoveTo || control.mode == FlightMode::Approach;
+    const bool autopilot = control.mode == FlightMode::MoveTo || control.mode == FlightMode::Approach ||
+                           control.mode == FlightMode::Pursue;
 
-    // New orders that are not autopilot trips (stop, manual, drift) cancel any hyperspace activity.
-    if (control.phase != DrivePhase::Sublight && (!autopilot || !target.valid)) {
+    // New orders that are not autopilot trips (stop, manual, drift) cancel any hyperspace activity, and so
+    // does losing the hyperspace drive (damage while charging): a jump at zero speed would never end.
+    if (control.phase != DrivePhase::Sublight &&
+        (!autopilot || !target.valid || drive.hyperspaceSpeed <= 0.0)) {
         if (control.phase == DrivePhase::Hyperspace) {
             kinematics.velocity = {}; // emergency drop-out: the drive dumps the jump velocity
             result.leftHyperspace = true;
@@ -286,10 +294,21 @@ const OrbitState& FlightSystem::bodyState(const World& world, EntityId body, Sim
     return m_bodyStates[index];
 }
 
-TargetState FlightSystem::resolveCached(const World& world, const ShipControl& control, SimTime time) {
+TargetState FlightSystem::resolveCached(const World& world, EntityId ship, const ShipControl& control,
+                                        SimTime time) {
     TargetState target;
-    if (control.mode == FlightMode::Approach && world.isAlive(control.target) &&
-        world.components<CelestialBody>().contains(control.target)) {
+    if (control.mode == FlightMode::Pursue) {
+        // The track as the faction knows it, extrapolated from the last detection at constant velocity.
+        const ShipIdentity* identity = world.components<ShipIdentity>().tryGet(ship);
+        const SensorContact* contact = m_sensors != nullptr && identity != nullptr
+                                           ? m_sensors->findContact(identity->faction, control.track)
+                                           : nullptr;
+        if (contact != nullptr) {
+            const f64 age = (time - contact->lastSeen).toSeconds();
+            target = {contact->position + contact->velocity * age, contact->velocity, true, -1};
+        }
+    } else if (control.mode == FlightMode::Approach && world.isAlive(control.target) &&
+               world.components<CelestialBody>().contains(control.target)) {
         const OrbitState& state = bodyState(world, control.target, time);
         target = {state.position, state.velocity, true, -1};
     } else {
@@ -339,7 +358,7 @@ void FlightSystem::update(const TickContext& context) {
         }
         m_targets.resize(count);
         for (u32 i = 0; i < count; ++i) {
-            m_targets[i] = resolveCached(world, control[i], stateTime);
+            m_targets[i] = resolveCached(world, ships[i], control[i], stateTime);
         }
     }
 

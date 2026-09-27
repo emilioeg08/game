@@ -46,6 +46,7 @@ enum class FlightMode : u8 {
     MoveTo,   // fly to a fixed point and stop there
     Approach, // fly to an entity and keep station at `standoff` from it
     Manual,   // thrust along `manualThrust` (player piloting)
+    Pursue,   // follow a sensor track of the ship's own faction at `standoff` (the estimate, never the truth)
     Count
 };
 
@@ -65,7 +66,8 @@ struct ShipControl {
     EntityId target;      // Approach
     Vec3d point;          // MoveTo
     Vec3d manualThrust;   // Manual: direction scaled by throttle, length <= 1
-    f64 standoff = 0.0;   // Approach: keep this distance (m) from the target's centre
+    f64 standoff = 0.0;   // Approach/Pursue: keep this distance (m) from the target's centre
+    u32 track = 0;        // Pursue: sensor track id in the faction's picture
     bool arrived = false; // MoveTo/Approach: within tolerance and matched velocity
     DrivePhase phase = DrivePhase::Sublight;
     f64 chargeRemaining = 0.0; // s, while Charging
@@ -77,6 +79,7 @@ struct ShipControl {
         ar.io("point", point);
         ar.io("manualThrust", manualThrust);
         ar.io("standoff", standoff);
+        ar.io("track", track);
         ar.io("arrived", arrived);
         ar.io("phase", phase);
         ar.io("chargeRemaining", chargeRemaining);

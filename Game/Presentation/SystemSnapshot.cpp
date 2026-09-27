@@ -1,5 +1,6 @@
 #include "Game/Presentation/SystemSnapshot.h"
 
+#include "Game/Sandbox/Content.h"
 #include "Game/Sandbox/Sandbox.h"
 #include "Simulation/Kernel/Simulation.h"
 #include "Space/Ships/Flight.h"
@@ -7,6 +8,13 @@
 #include <algorithm>
 
 namespace gx {
+namespace {
+
+// Weapon fire is seen within this distance of the player's ship; explosions much farther.
+constexpr f64 kFireVisibleRange = 1e7;
+constexpr f64 kExplosionVisibleRange = 5e9;
+
+} // namespace
 
 const BodyView* SystemSnapshot::findBody(EntityId id) const {
     const auto it =
@@ -58,6 +66,16 @@ void SnapshotBuilder::build(const Simulation& simulation, const Sandbox& sandbox
     out.bodies.clear();
     out.ships.clear();
     out.contacts.clear();
+    out.beams.clear();
+    out.projectiles.clear();
+    out.explosions.clear();
+    out.playerModules.clear();
+    out.playerFaction = content::kFactionPlayer;
+    out.playerAlive = false;
+    out.playerRespawnIn = 0.0;
+    out.playerSensors = {};
+    out.playerEmission = 0.0;
+    out.tactical = sandbox.tactical();
 
     const ComponentStore<CelestialBody>& bodies = world.components<CelestialBody>();
     const ComponentStore<OrbitsParent>& orbits = world.components<OrbitsParent>();
@@ -106,11 +124,31 @@ void SnapshotBuilder::build(const Simulation& simulation, const Sandbox& sandbox
         view.target = control->target;
         view.arrived = control->arrived;
         view.isPlayer = id == sandbox.playerShip();
+        view.track = control->mode == FlightMode::Pursue ? control->track : 0;
+        if (const CombatControl* orders = world.components<CombatControl>().tryGet(id)) {
+            view.fireTrack = orders->targetTrack;
+        }
+        if (const ShipModules* modules = world.components<ShipModules>().tryGet(id)) {
+            const ShipModule* structure = structureOf(*modules);
+            view.structure = structure != nullptr ? structure->fraction() : 1.0;
+            view.powered = hasPower(*modules);
+        }
         const TargetState target = resolveTarget(world, *control, now);
         view.targetPosition = target.valid ? target.position : view.position;
         out.ships.push_back(view);
         if (view.isPlayer) {
-            out.playerFaction = identity.faction;
+            out.playerAlive = true;
+            if (const ShipModules* modules = world.components<ShipModules>().tryGet(id)) {
+                for (u32 m = 0; m < modules->modules.size(); ++m) {
+                    const ShipModule& module = modules->modules[m];
+                    ModuleView moduleView{module.type,         module.weapon,   module.fraction(),
+                                          module.functional(), module.cooldown, {}};
+                    if (module.type == ModuleType::Weapon) {
+                        moduleView.fire = sandbox.combat().fireSolution(world, id, m);
+                    }
+                    out.playerModules.push_back(moduleView);
+                }
+            }
             const SensorSuite* suite = world.components<SensorSuite>().tryGet(id);
             const SignatureProfile* profile = world.components<SignatureProfile>().tryGet(id);
             const ShipDrive* drive = world.components<ShipDrive>().tryGet(id);
@@ -119,6 +157,43 @@ void SnapshotBuilder::build(const Simulation& simulation, const Sandbox& sandbox
                 out.playerEmission = shipEmission(*profile, *drive, *state, *control, *suite);
             }
         }
+    }
+
+    if (!out.playerAlive) {
+        out.playerRespawnIn = std::max(0.0, (sandbox.playerRespawnAt() - now).toSeconds());
+    }
+
+    // Weapon fire and explosions near the player (all of them are kept, flagged, for the debug view).
+    Vec3d player;
+    const bool hasPlayer = out.playerAlive && out.positionOf(sandbox.playerShip(), player);
+    const auto near = [&](const Vec3d& position, f64 range) {
+        return hasPlayer && lengthSquared(position - player) < range * range;
+    };
+    const CombatSystem& combat = sandbox.combat();
+    const std::vector<BeamShot>& shots = combat.recentBeams();
+    for (usize i = 0; i < shots.size(); ++i) {
+        const BeamShot& shot = shots[i];
+        // Only each shooter's latest volley: older beams of a moving shooter would smear into a band.
+        const bool superseded = std::any_of(
+            shots.begin() + static_cast<std::ptrdiff_t>(i) + 1, shots.end(),
+            [&](const BeamShot& later) { return later.shooter == shot.shooter && later.time > shot.time; });
+        if (superseded) {
+            continue;
+        }
+        const bool byPlayer = shot.shooter == sandbox.playerShip();
+        out.beams.push_back(
+            {shot.from, shot.to, shot.hit, byPlayer,
+             byPlayer || near(shot.from, kFireVisibleRange) || near(shot.to, kFireVisibleRange)});
+    }
+    for (const Projectile& projectile : combat.projectiles()) {
+        const bool byPlayer = projectile.shooter == sandbox.playerShip();
+        const Vec3d position = projectile.position + projectile.velocity * sinceFlight;
+        out.projectiles.push_back(
+            {position, projectile.velocity, byPlayer, byPlayer || near(position, kFireVisibleRange)});
+    }
+    for (const Explosion& explosion : combat.recentExplosions()) {
+        out.explosions.push_back({explosion.position, (now - explosion.time).toSeconds(),
+                                  near(explosion.position, kExplosionVisibleRange)});
     }
 
     for (const SensorContact& contact : sandbox.sensors().picture(out.playerFaction).contacts) {
