@@ -799,7 +799,7 @@ void GameApp::drawContractsWindow() {
     ImGui::TextDisabled("Tus contratos");
     bool any = false;
     for (const Contract& contract : contracts) {
-        if (contract.state != ContractState::Accepted) {
+        if (contract.state != ContractState::Accepted || contract.holderFaction != content::kFactionPlayer) {
             continue;
         }
         any = true;

@@ -294,3 +294,15 @@ Coste: las patrullas añaden una facción observadora con 3 naves a los sensores
 
 Sin patrullas se publican 41–51 contratos en 8 h. La mayoría son suministros, porque en headless nadie los
 acepta y caducan.
+
+## M3.4 — Comerciantes con contratos (2026-09-27)
+
+Comparación A/B, `gx_headless --sandbox --minutes 480` con y sin `--no-trader-contracts`, Release:
+
+| | Escasez total | Entregas |
+|---|---|---|
+| Solo el jugador acepta contratos | 2.942 t | 31.084 t |
+| Los comerciantes también | 2.046 t (−30 %) | 35.241 t (+13 %) |
+
+Por semillas, en `docs/DECISIONS.md` (ADR-032). Sin coste de simulación apreciable: el planificador
+recorre como mucho 6 contratos abiertos.

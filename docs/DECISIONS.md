@@ -439,3 +439,29 @@ sustituya y explique por qué.
   - abandonar cuesta reputación;
   - recompensa nombrada: 2.500 + 1.500 cr;
   - la tesorería más lo reservado cuadra siempre con impuestos + reparaciones − recompensas.
+
+## ADR-032 — Los comerciantes aceptan contratos de suministro
+
+- **Contexto:** con los contratos de ADR-031, casi todos los suministros caducaban: 30–37 de cada ~45 en
+  8 h, porque solo podía aceptarlos el jugador. Una escasez con recompensa publicada debería atraer a
+  quien pueda resolverla (prompt §17: la IA actúa por objetivos y recursos).
+- **Decisión:**
+  - La estimación de ingresos del planificador (`revenue`) incluye la recompensa de un suministro
+    abierto en ese puerto y para ese bien, si la carga lo cubre entero.
+  - El contrato se acepta al comprometer el plan (`holderFaction` y `holder` del contrato).
+  - Se entrega al atracar (`deliverTraderContracts`), antes de vender el resto.
+  - Si el carguero se pierde, el contrato vuelve al tablón en la siguiente revisión.
+  - `SandboxConfig::tradersTakeContracts` (y `--no-trader-contracts` en headless) permite la comparación
+    A/B.
+- **Medido** (8 h, 4 semillas, A/B):
+
+| Semilla | Escasez (con / sin) | Entregas (con / sin) | Completados por comerciantes |
+|---|---|---|---|
+| 2400 | 888 / 1.166 t | 8.959 / 7.103 t | 4 |
+| 7 | 325 / 552 t | 10.417 / 10.096 t | 10 |
+| 99 | 826 / 927 t | 7.602 / 6.379 t | 2 |
+| 12345 | 7 / 297 t | 8.263 / 7.506 t | 5 |
+
+  Las cuatro semillas van en la misma dirección. El efecto es real, no ruido de trayectoria.
+- **Consecuencia para el jugador:** los suministros fáciles desaparecen antes del tablón. La ventaja del
+  jugador es su nave rápida para los urgentes y lejanos, y aceptar primero en la estación.

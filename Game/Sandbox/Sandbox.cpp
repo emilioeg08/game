@@ -437,15 +437,37 @@ void Sandbox::planHaulerTrip(World& world, EntityId ship, HaulerBrain& brain, Sh
     };
     // What `tonnes` would fetch at a known market: the price moves as they are sold, after the deliveries the
     // traders already have on their way there, and the market takes no more than it can store.
+    // An open supply contract there (the network shares the stations' board) pays its reward, if this load
+    // covers it whole; the rest is sold.
+    const auto openContract = [&](EntityId port, GoodId good) -> Contract* {
+        if (!m_config.tradersTakeContracts) {
+            return nullptr;
+        }
+        for (Contract& contract : m_contracts) {
+            if (contract.state == ContractState::Open && contract.kind == ContractKind::Delivery &&
+                contract.port == port && contract.good == good) {
+                return &contract;
+            }
+        }
+        return nullptr;
+    };
     const auto revenue = [&](const PortPrices& known, GoodId good, f64 tonnes) {
+        f64 value = 0.0;
+        if (const Contract* contract = openContract(known.port, good)) {
+            const auto owed = static_cast<f64>(contract->tonnes - contract->delivered);
+            if (tonnes >= owed) {
+                value += static_cast<f64>(contract->reward);
+                tonnes -= owed;
+            }
+        }
         const PricePoint* bid = known.find(good);
         if (bid == nullptr || bid->target <= 0.0) {
-            return 0.0;
+            return value;
         }
         const f64 stock = bid->stockRatio * bid->target + inflight(known.port, good);
         const f64 sellable = std::clamp(bid->target * content::kMarketCapacityFactor - stock, 0.0, tonnes);
-        return sellable * unitPrice(m_economy.basePrice(good), stock + sellable / 2.0, bid->target) *
-               (1.0 - kMarketSpread);
+        return value + sellable * unitPrice(m_economy.basePrice(good), stock + sellable / 2.0, bid->target) *
+                           (1.0 - kMarketSpread);
     };
 
     EntityId destination;
@@ -557,9 +579,20 @@ void Sandbox::planHaulerTrip(World& world, EntityId ship, HaulerBrain& brain, Sh
         m_stats.haulerTrades += bought.tonnes > 0 ? 1 : 0;
         m_traderPrices.observe(here, *market, goods, now);
     }
-    // The network knows where this cargo is going: later plans in this run count on it.
+    // The network knows where this cargo is going: later plans in this run count on it. A contract the plan
+    // counted on is taken now (off the board: nobody else will fly the same order).
     for (const CargoItem& item : hold.items) {
         addInflight(destination, item.good, item.tonnes);
+        if (Contract* contract = openContract(destination, item.good);
+            contract != nullptr && item.tonnes >= contract->tonnes - contract->delivered) {
+            contract->state = ContractState::Accepted;
+            contract->holderFaction = content::kFactionIndependent;
+            contract->holder = ship;
+            addJournal(now,
+                       std::format("{} acepta el contrato de suministro: {}.", nameOf(world, ship),
+                                   describe(*contract)),
+                       JournalKind::Traffic);
+        }
     }
     control.mode = FlightMode::Approach;
     control.target = destination;
@@ -586,6 +619,7 @@ void Sandbox::sellCargo(World& world, EntityId ship, EntityId port, SimTime now)
     if (market == nullptr || hold == nullptr || wallet == nullptr) {
         return;
     }
+    deliverTraderContracts(world, ship, port, now);
     const std::vector<CargoItem> items = hold->items; // selling edits the hold
     for (const CargoItem& item : items) {
         if (MarketGood* good = market->find(item.good)) {

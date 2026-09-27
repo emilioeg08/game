@@ -6,7 +6,7 @@
 > (`Game/Sandbox/Content.h`) o en parámetros de generación, no dispersos por los sistemas, para que moverlos
 > a ficheros de datos (modding) sea un cambio local.
 
-## Estado: slice M3.3 "Contratos"
+## Estado: slice M3.4 "Los comerciantes también aceptan contratos"
 
 Se puede:
 
@@ -24,7 +24,7 @@ Se puede:
 - ver cómo la Autoridad **patrulla** con lo que recauda (M3.2): acude a las llamadas de socorro, persigue
   piratas y va a por ti si eres hostil;
 - aceptar **contratos** (M3.3) que nacen de la situación real: suministros a puertos con escasez y
-  recompensas por piratas identificados.
+  recompensas por piratas identificados. Los cargueros compiten por los suministros (M3.4).
 
 Con esto el primer vertical slice del prompt (§5) está completo.
 
@@ -359,6 +359,22 @@ Todo contrato sale del estado real de la simulación; no hay misiones inventadas
 - **La Autoridad prioriza sus patrullas.** Solo reserva una recompensa (la retira de la tesorería hasta
   que se cobra o caduca) si le sobra dinero después de la próxima compra de patrullero, 4 h de
   mantenimiento de la flota y 5.000 cr de margen.
+
+**Los comerciantes compiten por los suministros (ADR-032).**
+
+- La red de comerciantes comparte el tablón, igual que el boletín de precios.
+- Al planificar un viaje, un carguero suma la recompensa de un suministro abierto en ese destino y para ese
+  bien, si su carga lo cubre entero.
+- Si su mejor plan lo usa, lo acepta y el contrato desaparece del tablón. Al llegar entrega esa parte en
+  las existencias del puerto y vende el resto.
+- Si el carguero muere o quiebra antes, el contrato vuelve al tablón.
+- Nunca toman los contratos que has aceptado tú.
+
+Medido en 8 h y 4 semillas:
+
+- la escasez total baja un 30 % (de 2.942 a 2.046 t);
+- las entregas suben un 13 % (de 31.084 a 35.241 t);
+- en las cuatro semillas en la misma dirección.
 
 **Medido** (8 h, 4 semillas, 3 piratas, hasta 3 patrullas): se publican entre 18 y 43 contratos. Con
 patrullas se pierden 31 cargueros frente a 46 sin ellas (−33 %). Cuando las recompensas salían de la

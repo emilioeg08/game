@@ -57,35 +57,51 @@ std::string Sandbox::describe(const Contract& contract) const {
 
 void Sandbox::closeContract(Contract& contract, ContractState state, SimTime now) {
     const bool wasAccepted = contract.state == ContractState::Accepted;
+    const bool player = wasAccepted && contract.holderFaction == content::kFactionPlayer;
     contract.state = state;
     contract.closed = now;
+    World& world = m_simulation->world();
     switch (state) {
-    case ContractState::Completed: {
-        World& world = m_simulation->world();
+    case ContractState::Completed:
+        ++m_stats.contractsCompleted;
+        m_stats.contractRewardsPaid += contract.reward;
+        if (!player) {
+            // A trader earned it (ADR-032): the reward goes to its purse, the news to everybody.
+            if (Wallet* wallet = world.isAlive(contract.holder)
+                                     ? world.components<Wallet>().tryGet(contract.holder)
+                                     : nullptr) {
+                wallet->credits += contract.reward;
+            }
+            ++m_stats.contractsCompletedByTraders;
+            addJournal(now,
+                       std::format("Noticias: {} cumple un contrato de suministro ({}).",
+                                   nameOf(world, contract.holder), describe(contract)),
+                       JournalKind::News);
+            return;
+        }
         if (Wallet* wallet = m_player.isValid() ? world.components<Wallet>().tryGet(m_player) : nullptr) {
             wallet->credits += contract.reward;
         } else {
             m_playerCredits += contract.reward;
         }
-        ++m_stats.contractsCompleted;
-        m_stats.contractRewardsPaid += contract.reward;
         changeReputation(content::kReputationContractDone);
         addJournal(now,
                    std::format("Contrato cumplido: {}. Cobras {} cr.", describe(contract), contract.reward));
         return; // the escrow (or the port's purse) is the reward
-    }
     case ContractState::Failed:
         ++m_stats.contractsFailed;
-        changeReputation(content::kReputationContractFailed);
-        addJournal(now,
-                   std::format("Contrato fallido: {}. Reputación {:.0f}.", describe(contract), m_reputation));
+        if (player) {
+            changeReputation(content::kReputationContractFailed);
+            addJournal(now, std::format("Contrato fallido: {}. Reputación {:.0f}.", describe(contract),
+                                        m_reputation));
+        }
         break;
     case ContractState::Expired:
         ++m_stats.contractsExpired;
         break;
     case ContractState::Cancelled:
         ++m_stats.contractsCancelled;
-        if (wasAccepted) {
+        if (player) {
             addJournal(now, std::format("Contrato cancelado: {}.", describe(contract)));
         }
         break;
@@ -94,6 +110,33 @@ void Sandbox::closeContract(Contract& contract, ContractState state, SimTime now
     }
     if (contract.escrowed) {
         m_treasury += contract.reward; // nobody earned it: back to the treasury
+    }
+}
+
+void Sandbox::deliverTraderContracts(World& world, EntityId ship, EntityId port, SimTime now) {
+    CargoHold* hold = world.components<CargoHold>().tryGet(ship);
+    Market* market = world.components<Market>().tryGet(port);
+    if (hold == nullptr || market == nullptr) {
+        return;
+    }
+    for (Contract& contract : m_contracts) {
+        if (contract.state != ContractState::Accepted || contract.holderFaction == content::kFactionPlayer ||
+            contract.holder != ship || contract.port != port) {
+            continue;
+        }
+        MarketGood* good = market->find(contract.good);
+        if (good == nullptr) {
+            continue;
+        }
+        // Straight into the port's stock, like the player's deliveries.
+        const u32 tonnes = hold->remove(contract.good, contract.tonnes - contract.delivered);
+        good->stock += tonnes;
+        good->boughtFromShips += tonnes;
+        contract.delivered += tonnes;
+        m_stats.tonnesDelivered += tonnes;
+        if (contract.delivered >= contract.tonnes) {
+            closeContract(contract, ContractState::Completed, now);
+        }
     }
 }
 
@@ -119,6 +162,11 @@ void Sandbox::updateContracts(const TickContext& context) {
         }
         if (contract.kind == ContractKind::Bounty && !world.isAlive(contract.target)) {
             closeContract(contract, ContractState::Cancelled, now);
+        } else if (contract.state == ContractState::Accepted &&
+                   contract.holderFaction != content::kFactionPlayer && !world.isAlive(contract.holder) &&
+                   now < contract.deadline) {
+            contract.state = ContractState::Open; // its trader was lost or went bankrupt: still needed
+            contract.holder = {};
         } else if (now >= contract.deadline) {
             closeContract(contract,
                           contract.state == ContractState::Accepted ? ContractState::Failed
@@ -259,6 +307,8 @@ void Sandbox::onContractCommand(const ContractCommand& command, const TickContex
             reject("too many", "Ya tienes tres contratos en curso.");
         } else {
             contract.state = ContractState::Accepted;
+            contract.holderFaction = content::kFactionPlayer;
+            contract.holder = command.ship;
             addJournal(context.now,
                        std::format("Contrato aceptado: {} ({} cr).", describe(contract), contract.reward));
         }
@@ -268,7 +318,8 @@ void Sandbox::onContractCommand(const ContractCommand& command, const TickContex
         CargoHold* hold = world.components<CargoHold>().tryGet(command.ship);
         Market* market = world.components<Market>().tryGet(docked);
         MarketGood* good = market != nullptr ? market->find(contract.good) : nullptr;
-        if (contract.state != ContractState::Accepted || contract.kind != ContractKind::Delivery) {
+        if (contract.state != ContractState::Accepted || contract.kind != ContractKind::Delivery ||
+            contract.holderFaction != content::kFactionPlayer) {
             reject("nothing to deliver", "Ese contrato no es de entrega o no es tuyo.");
         } else if (docked != contract.port || good == nullptr || hold == nullptr) {
             reject("wrong port", "Tienes que estar atracado en el puerto de destino.");
@@ -290,7 +341,7 @@ void Sandbox::onContractCommand(const ContractCommand& command, const TickContex
         return;
     }
     case ContractAction::Abandon:
-        if (contract.state != ContractState::Accepted) {
+        if (contract.state != ContractState::Accepted || contract.holderFaction != content::kFactionPlayer) {
             reject("not yours", "Ese contrato no es tuyo.");
         } else {
             closeContract(contract, ContractState::Failed, context.now);

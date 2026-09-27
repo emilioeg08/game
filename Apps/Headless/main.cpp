@@ -59,6 +59,7 @@ struct Options {
     u32 haulers = 12;
     u32 pirates = 3;
     u32 patrols = 3;
+    bool traderContracts = true;
     i32 flyTo = -1;       // order the player's ship to this port at the start
     bool journal = false; // print the game journal at the end
     bool markets = false; // print every port's market at the end
@@ -86,6 +87,7 @@ void printUsage() {
                 "  --sandbox           run the playable star system instead (with --seed, --minutes,\n"
                 "                      --haulers, --pirates): combat and traffic statistics\n"
                 "  --patrols <n>       sandbox: most patrols the Authority may keep (default 3)\n"
+                "  --no-trader-contracts  sandbox: only the player takes supply contracts\n"
                 "  --fly-to <i>        sandbox: send the player's ship to port i at the start\n"
                 "  --journal           sandbox: print the game journal at the end\n"
                 "  --markets           sandbox: print every port's market at the end\n"
@@ -150,6 +152,8 @@ int parseOptions(int argc, char** argv, Options& options) {
             ok = parseNumber(value(), options.haulers);
         } else if (arg == "--pirates") {
             ok = parseNumber(value(), options.pirates);
+        } else if (arg == "--no-trader-contracts") {
+            options.traderContracts = false;
         } else if (arg == "--patrols") {
             ok = parseNumber(value(), options.patrols);
         } else if (arg == "--fly-to") {
@@ -362,10 +366,12 @@ void printEconomy(const Simulation& simulation, const Sandbox& sandbox, bool per
         static_cast<unsigned long long>(stats.distressAnswered),
         static_cast<long long>(stats.patrolUpkeepPaid));
     std::printf(
-        "contracts: %llu posted | %llu completed, %llu failed, %llu expired, %llu cancelled | %zu on the "
-        "board\n",
+        "contracts: %llu posted | %llu completed (%llu by traders), %llu failed, %llu expired, %llu "
+        "cancelled | "
+        "%zu on the board\n",
         static_cast<unsigned long long>(stats.contractsPosted),
         static_cast<unsigned long long>(stats.contractsCompleted),
+        static_cast<unsigned long long>(stats.contractsCompletedByTraders),
         static_cast<unsigned long long>(stats.contractsFailed),
         static_cast<unsigned long long>(stats.contractsExpired),
         static_cast<unsigned long long>(stats.contractsCancelled),
@@ -397,6 +403,7 @@ int runSandbox(const Options& options) {
     config.haulers = options.haulers;
     config.pirates = options.pirates;
     config.maxPatrols = options.patrols;
+    config.tradersTakeContracts = options.traderContracts;
     Sandbox sandbox(config);
     Simulation simulation(Simulation::Config{.seed = config.seed}, jobs);
     sandbox.install(simulation);

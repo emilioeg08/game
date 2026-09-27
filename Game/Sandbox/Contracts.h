@@ -44,6 +44,8 @@ struct Contract {
     std::string targetName;
     i64 reward = 0;
     bool escrowed = false; // the reward was taken from the treasury when posted
+    u32 holderFaction = 0; // who accepted it: the player, or a trader (Accepted and later)
+    EntityId holder;       // the trader's ship (for the player: whichever ship it is flying)
     SimTime posted;
     SimTime deadline;
     SimTime closed; // when it left Open/Accepted
@@ -65,6 +67,8 @@ struct Contract {
         ar.io("targetName", targetName);
         ar.io("reward", reward);
         ar.io("escrowed", escrowed);
+        ar.io("holderFaction", holderFaction);
+        ar.io("holder", holder);
         ar.io("posted", posted);
         ar.io("deadline", deadline);
         ar.io("closed", closed);

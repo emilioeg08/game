@@ -1006,3 +1006,61 @@ GX_TEST(Sandbox, BountyContractsPayForTheNamedPirate) {
     GX_EXPECT(world.components<Wallet>().get(player).credits >=
               content::kPlayerStartCredits + content::kContractBountyReward + content::kPirateBounty);
 }
+
+GX_TEST(Sandbox, TradersTakeSupplyContractsAndReleaseThemWhenLost) {
+    SandboxConfig config;
+    config.pirates = 0;
+    Session session(3, config);
+    session.sandbox.populate(session.simulation);
+    World& world = session.simulation.world();
+
+    // Find a contract a trader has taken, and lose the trader: the contract goes back to the board.
+    bool released = false;
+    for (int minute = 0; minute < 8 * 60 && !released; ++minute) {
+        session.simulation.runFor(SimDuration::minutes(1));
+        for (const Contract& contract : session.sandbox.contracts()) {
+            if (contract.state == ContractState::Accepted &&
+                contract.holderFaction == content::kFactionIndependent && world.isAlive(contract.holder) &&
+                contract.deadline - session.simulation.now() > SimDuration::minutes(5)) {
+                const u32 id = contract.id;
+                world.destroyEntity(contract.holder); // between steps: as if it had been lost
+                session.simulation.runFor(SimDuration::seconds(31));
+                for (const Contract& again : session.sandbox.contracts()) {
+                    released = released || (again.id == id && again.state == ContractState::Open);
+                }
+                break;
+            }
+        }
+    }
+    GX_EXPECT(released);
+    // Traders complete a few supply contracts over hours (2-10 in 8 h across the measured seeds).
+    session.simulation.runUntil(SimTime::epoch() + SimDuration::hours(8));
+    GX_EXPECT(session.sandbox.stats().contractsCompletedByTraders > 0);
+    GX_EXPECT(session.journalContains("cumple un contrato de suministro"));
+}
+
+GX_TEST(Sandbox, TradersNeverTakeThePlayersContracts) {
+    SandboxConfig config;
+    config.pirates = 0;
+    Session session(3, config);
+    session.sandbox.populate(session.simulation);
+    World& world = session.simulation.world();
+    const EntityId player = session.sandbox.playerShip();
+    world.components<Market>().get(session.sandbox.homePort()).find(content::kGoodWater)->stock = 0.0;
+    session.simulation.runFor(SimDuration::seconds(31));
+    u32 id = 0;
+    for (const Contract& contract : session.sandbox.contracts()) {
+        if (contract.state == ContractState::Open && contract.port == session.sandbox.homePort()) {
+            id = contract.id;
+        }
+    }
+    GX_REQUIRE(id != 0);
+    session.simulation.submitCommand(ContractCommand{player, id, ContractAction::Accept});
+    session.simulation.runFor(SimDuration::minutes(30)); // traders come and go with water meanwhile
+    for (const Contract& contract : session.sandbox.contracts()) {
+        if (contract.id == id) {
+            GX_EXPECT(contract.state == ContractState::Accepted);
+            GX_EXPECT_EQ(contract.holderFaction, static_cast<u32>(content::kFactionPlayer));
+        }
+    }
+}

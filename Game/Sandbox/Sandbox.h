@@ -49,6 +49,8 @@ struct SandboxConfig {
     // The Authority keeps at most this many patrols, as far as its treasury allows (ADR-030).
     u32 maxPatrols = 3;
     SimDuration authorityReview = SimDuration::minutes(2);
+    // Traders take supply contracts too, competing with the player (ADR-032). Off: only the player does.
+    bool tradersTakeContracts = true;
 };
 
 // Player input. Validated by the handler (never trusted).
@@ -234,6 +236,7 @@ struct SandboxStats {
     u64 contractsExpired = 0;
     u64 contractsCancelled = 0;
     i64 contractRewardsPaid = 0;
+    u64 contractsCompletedByTraders = 0;
 
     template <typename Archive>
     void io(Archive& ar) {
@@ -272,6 +275,7 @@ struct SandboxStats {
         ar.io("contractsExpired", contractsExpired);
         ar.io("contractsCancelled", contractsCancelled);
         ar.io("contractRewardsPaid", contractRewardsPaid);
+        ar.io("contractsCompletedByTraders", contractsCompletedByTraders);
     }
 };
 
@@ -366,6 +370,8 @@ private:
     void planHaulerTrip(World& world, EntityId ship, HaulerBrain& brain, ShipControl& control, SimTime now,
                         Rng& rng);
     void sellCargo(World& world, EntityId ship, EntityId port, SimTime now);
+    // A trader arriving at a port hands over what its supply contracts there ask for.
+    void deliverTraderContracts(World& world, EntityId ship, EntityId port, SimTime now);
     void addInflight(EntityId port, GoodId good, f64 tonnes);
     void addDanger(EntityId port, SimTime now);
     void onTradeCommand(const TradeCommand& command, const TickContext& context);

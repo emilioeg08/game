@@ -3,7 +3,7 @@
 Motor propio en C++20 para un sandbox 4X de simulación galáctica persistente: la galaxia existe, cambia y
 produce consecuencias aunque el jugador no la esté mirando.
 
-**Estado: M3.3 (Contratos).** El primer vertical slice está completo. Hay un juego en
+**Estado: M3.4 (Los comerciantes también aceptan contratos).** El primer vertical slice está completo. Hay un juego en
 tiempo real (×1, ×3, ×10):
 
 - un sistema estelar generado con órbitas keplerianas;
@@ -32,7 +32,8 @@ La Autoridad convierte lo que recauda en patrullas. Acuden a las llamadas de soc
 persiguen piratas y van a por ti si eres hostil. Con ellas se pierden un tercio menos de cargueros.
 
 Hay contratos que nacen de lo que pasa: suministros urgentes a puertos con escasez real (los paga el
-puerto) y recompensas por piratas identificados (las paga la Autoridad). Se aceptan en las estaciones (K).
+puerto) y recompensas por piratas identificados (las paga la Autoridad). Se aceptan en las estaciones (K),
+y los cargueros compiten contigo por los suministros.
 
 Por debajo están el kernel de M1 (entidades, eventos, comandos, save/load, replay, LOD por frecuencia) y la
 fase 0. El diseño es provisional
@@ -128,5 +129,5 @@ cmake/ scripts/ tools/
   combate, economía, NPC, controles).
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md): capas, tiempo, pipeline, presentación, threading,
   entidades, eventos, comandos, persistencia, determinismo, LOD, referencias, contradicciones y riesgos.
-- [docs/DECISIONS.md](docs/DECISIONS.md): registro de decisiones (ADR-001 a ADR-031).
+- [docs/DECISIONS.md](docs/DECISIONS.md): registro de decisiones (ADR-001 a ADR-032).
 - [docs/BENCHMARKS.md](docs/BENCHMARKS.md): método y resultados medidos por hito.
