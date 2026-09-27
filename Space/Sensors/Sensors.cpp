@@ -19,7 +19,9 @@ constexpr u64 kScanStream = fnv1a64("space.sensors.scan");
 constexpr u64 kGhostStream = fnv1a64("space.sensors.ghost");
 constexpr f64 kGhostChance = 0.04; // per faction per scan
 constexpr f64 kClassifySnr = 4.0;
-constexpr f64 kPassiveIdentifySnr = 25.0;
+// Naming a ship from its emissions alone takes a clear signal (ADR-029: an idle courier is identified by a
+// hauler within ~1,100 km, classified within ~11,000 km and detected within ~44,700 km).
+constexpr f64 kPassiveIdentifySnr = 400.0;
 constexpr f64 kActiveIdentifySnr = 4.0;
 constexpr f64 kTransponderError = 1'000.0; // m: transponders report their own position
 

@@ -167,6 +167,25 @@ inline constexpr f64 kDangerHalfLife = 1'200.0;    // s: memory of a loss near a
 inline constexpr f64 kTripOverhead = 180.0;        // s: charging, wells and docking in a trip estimate
 inline constexpr f64 kExploreAfter = 1'200.0;      // s: prices older than this are worth refreshing
 
+// --- Consequences (ADR-029) -------------------------------------------------------------------------------
+// The system's Authority taxes trade, charges for station repairs and pays bounties on pirates. Crews cost
+// wages. The traders' network reports whoever it catches attacking its ships: reputation.
+inline constexpr i64 kStartingTreasury = 20'000;
+inline constexpr f64 kTradeTaxRate = 0.03;        // of each tonne's price, buying and selling
+inline constexpr i64 kHaulerWagesPerMinute = 5;   // 300 cr/h per hauler crew
+inline constexpr f64 kRepairCostPerPoint = 3.0;   // credits per point of module health, at a station
+inline constexpr i64 kPirateBounty = 1'500;       // destroying or capturing a raider
+inline constexpr f64 kReputationHit = -10.0;      // identified attacking an independent ship
+inline constexpr f64 kReputationKill = -30.0;     // identified destroying one
+inline constexpr f64 kReputationBoarding = -20.0; // boarding one (they always know who boarded them)
+inline constexpr f64 kReputationPirateKill = 5.0;
+inline constexpr f64 kReputationRecoveryPerMinute = 0.5; // bad reputation fades back towards neutral
+inline constexpr f64 kHostileReputation = -30.0; // at or below: ports refuse trade, repairs, bulletins
+inline constexpr f64 kMaxReputation = 100.0;
+inline constexpr f64 kBoardingRange = 5'000.0; // m
+inline constexpr f64 kBoardingSpeed = 200.0;   // m/s, relative
+inline constexpr f64 kOffenseMemory = 60.0;    // s: repeated hits on one ship count as one offence
+
 enum class PortRole : u8 { Planet, Refinery, Factory, Industry };
 
 // Economic profile of a port. Targets and capacities are filled in by the caller from the rates.

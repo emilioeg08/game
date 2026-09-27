@@ -193,33 +193,39 @@ TradeResult quoteBuy(const MarketGood& good, f64 basePrice, u32 tonnes) {
     return result;
 }
 
-TradeResult buyGoods(MarketGood& good, f64 basePrice, u32 tonnes, CargoHold& hold, Wallet& wallet) {
+TradeResult buyGoods(MarketGood& good, f64 basePrice, u32 tonnes, CargoHold& hold, Wallet& wallet,
+                     f64 taxRate) {
     TradeResult result;
     const u32 limit = std::min(tonnes, hold.space());
     while (result.tonnes < limit && good.stock >= 1.0) {
         const i64 price = buyPrice(good, basePrice);
-        if (price > wallet.credits) {
+        const i64 tax = std::llround(static_cast<f64>(price) * taxRate);
+        if (price + tax > wallet.credits) {
             break;
         }
-        wallet.credits -= price;
+        wallet.credits -= price + tax;
         good.stock -= 1.0;
         good.soldToShips += 1.0;
         result.credits += price;
+        result.tax += tax;
         ++result.tonnes;
     }
     hold.add(good.good, result.tonnes);
     return result;
 }
 
-TradeResult sellGoods(MarketGood& good, f64 basePrice, u32 tonnes, CargoHold& hold, Wallet& wallet) {
+TradeResult sellGoods(MarketGood& good, f64 basePrice, u32 tonnes, CargoHold& hold, Wallet& wallet,
+                      f64 taxRate) {
     TradeResult result;
     const u32 limit = std::min(tonnes, hold.amount(good.good));
     while (result.tonnes < limit && good.stock + 1.0 <= good.capacity) {
         const i64 price = sellPrice(good, basePrice);
-        wallet.credits += price;
+        const i64 tax = std::llround(static_cast<f64>(price) * taxRate);
+        wallet.credits += price - tax;
         good.stock += 1.0;
         good.boughtFromShips += 1.0;
         result.credits += price;
+        result.tax += tax;
         ++result.tonnes;
     }
     hold.remove(good.good, result.tonnes);

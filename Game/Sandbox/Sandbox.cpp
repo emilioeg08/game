@@ -122,6 +122,10 @@ void Sandbox::install(Simulation& simulation) {
                                             [this](const EngageCommand& command, const TickContext& context) {
                                                 onEngageCommand(command, context);
                                             });
+    commands.registerCommand<BoardCommand>("Game.Board",
+                                           [this](const BoardCommand& command, const TickContext& context) {
+                                               onBoardCommand(command, context);
+                                           });
     commands.registerCommand<TradeCommand>("Game.Trade",
                                            [this](const TradeCommand& command, const TickContext& context) {
                                                onTradeCommand(command, context);
@@ -139,6 +143,11 @@ void Sandbox::install(Simulation& simulation) {
                           SimDuration::seconds(1),
                           {},
                           [this](const TickContext& context) { updatePirates(context); }});
+    simulation.addSystem({"Game.Payroll",
+                          TickPhase::Simulation,
+                          SimDuration::minutes(1),
+                          {},
+                          [this](const TickContext& context) { updatePayroll(context); }});
     m_flight.setSensors(&m_sensors);
     m_flightSystem = m_flight.install(simulation, m_config.strategicFlightPeriod);
     m_sensors.install(simulation, m_config.sensorScanPeriod);
@@ -180,6 +189,7 @@ void Sandbox::populate(Simulation& simulation) {
     m_nextHaulerSpawn = now;
     m_nextPirateSpawn = now;
     m_playerCredits = content::kPlayerStartCredits;
+    m_treasury = content::kStartingTreasury;
     m_stats.cargoLost.assign(content::kGoodCount, 0);
     // At the start everybody has the system's market bulletin; from then on knowledge travels with ships.
     for (const EntityId port : m_ports) {
@@ -344,6 +354,10 @@ void Sandbox::planHaulerTrip(World& world, EntityId ship, HaulerBrain& brain, Sh
                              SimTime now, Rng& rng) {
     CargoHold& hold = world.components<CargoHold>().get(ship);
     Wallet& wallet = world.components<Wallet>().get(ship);
+    if (wallet.credits < 0) {
+        brain.retiring = true; // cannot pay the crew: sells up and leaves (Game.Upkeep)
+        return;
+    }
     const EntityId here = dockedPort(world, ship);
     Market* market = here.isValid() ? world.components<Market>().tryGet(here) : nullptr;
     const std::vector<GoodDef>& goods = m_economy.goods();
@@ -499,8 +513,9 @@ void Sandbox::planHaulerTrip(World& world, EntityId ship, HaulerBrain& brain, Sh
         ++m_stats.explorationTrips;
     }
     if (loadTonnes > 0) {
-        const TradeResult bought =
-            buyGoods(*market->find(load), m_economy.basePrice(load), loadTonnes, hold, wallet);
+        const TradeResult bought = buyGoods(*market->find(load), m_economy.basePrice(load), loadTonnes, hold,
+                                            wallet, content::kTradeTaxRate);
+        collectTax(bought.tax);
         m_stats.haulerTrades += bought.tonnes > 0 ? 1 : 0;
         m_traderPrices.observe(here, *market, goods, now);
     }
@@ -536,8 +551,9 @@ void Sandbox::sellCargo(World& world, EntityId ship, EntityId port, SimTime now)
     const std::vector<CargoItem> items = hold->items; // selling edits the hold
     for (const CargoItem& item : items) {
         if (MarketGood* good = market->find(item.good)) {
-            const TradeResult sold =
-                sellGoods(*good, m_economy.basePrice(item.good), item.tonnes, *hold, *wallet);
+            const TradeResult sold = sellGoods(*good, m_economy.basePrice(item.good), item.tonnes, *hold,
+                                               *wallet, content::kTradeTaxRate);
+            collectTax(sold.tax);
             m_stats.tonnesDelivered += sold.tonnes;
         }
     }
@@ -618,7 +634,7 @@ void Sandbox::updateHaulers(const TickContext& context) {
         HaulerBrain& brain = brains.values()[i];
         ShipControl& control = controls.get(ship);
         const bool docked = control.arrived || control.mode == FlightMode::Stop;
-        if (!docked || context.now < brain.departAt) {
+        if (!docked || brain.retiring || context.now < brain.departAt) {
             continue;
         }
         // Randomness keyed by (ship, trip): order-independent.
@@ -780,6 +796,27 @@ void Sandbox::updateUpkeep(const TickContext& context) {
                 : nullptr;
         const bool atStation = port != nullptr && port->kind == BodyKind::Station;
         const bool quiet = (now - modules.lastDamaged).toSeconds() >= content::kDamageControlDelay;
+        if (atStation) {
+            // Station repairs are paid to the Authority, and refused to whoever it considers hostile.
+            f64 points = 0.0;
+            for (const ShipModule& module : modules.modules) {
+                points += std::clamp(module.maxHealth - module.health, 0.0,
+                                     content::kDockRepairRate * module.maxHealth * dt);
+            }
+            if (points <= 0.0) {
+                continue;
+            }
+            const i64 cost = std::llround(points * content::kRepairCostPerPoint);
+            Wallet* wallet = world.components<Wallet>().tryGet(ship);
+            if ((ship == m_player && hostile()) || (wallet != nullptr && wallet->credits < cost)) {
+                continue;
+            }
+            if (wallet != nullptr) {
+                wallet->credits -= cost;
+                m_treasury += cost;
+                m_stats.repairFees += cost;
+            }
+        }
         bool changed = false;
         for (ShipModule& module : modules.modules) {
             f64 limit = module.maxHealth;
@@ -815,6 +852,34 @@ void Sandbox::updateUpkeep(const TickContext& context) {
         ++m_stats.piratesLeft;
         m_nextPirateSpawn = std::max(m_nextPirateSpawn, now + m_config.pirateRespawnDelay);
     }
+
+    // Bankrupt traders sell up and leave; their place is taken by a newcomer later.
+    std::vector<EntityId> bankrupt;
+    const ComponentStore<HaulerBrain>& haulers = world.components<HaulerBrain>();
+    for (usize i = 0; i < haulers.size(); ++i) {
+        if (haulers.values()[i].retiring) {
+            bankrupt.push_back(haulers.entities()[i]);
+        }
+    }
+    for (const EntityId ship : bankrupt) {
+        if (const CargoHold* hold = world.components<CargoHold>().tryGet(ship)) {
+            for (const CargoItem& item : hold->items) {
+                m_stats.cargoLost[item.good] += item.tonnes; // leaves the system with the ship
+            }
+        }
+        addJournal(now, std::format("Noticias: {} quiebra y abandona el sistema.", nameOf(world, ship)));
+        world.destroyEntity(ship);
+        ++m_stats.bankruptcies;
+        m_nextHaulerSpawn = std::max(m_nextHaulerSpawn, now + m_config.haulerRespawnDelay);
+    }
+
+    // Bad reputation fades; old offences are forgotten.
+    if (m_reputation < 0.0) {
+        m_reputation = std::min(0.0, m_reputation + content::kReputationRecoveryPerMinute * dt / 60.0);
+    }
+    std::erase_if(m_offenses, [&](const Offense& offense) {
+        return (now - offense.time).toSeconds() > content::kOffenseMemory;
+    });
 
     // Newcomers replace the losses, one at a time.
     Rng rng = Rng::forStream(m_config.seed, kRespawnStream, m_stats.spawns);
@@ -861,7 +926,10 @@ void Sandbox::onShipArrived(const ShipArrived& event, const TickContext& context
             m_playerPrices.observe(event.target, *market, m_economy.goods(), context.now);
             // Stations publish the traders' price bulletin.
             const CelestialBody* body = world.components<CelestialBody>().tryGet(event.target);
-            if (body != nullptr && body->kind == BodyKind::Station) {
+            if (body != nullptr && body->kind == BodyKind::Station && hostile()) {
+                addJournal(context.now,
+                           "La estación no te da su boletín de precios: tu reputación es hostil.");
+            } else if (body != nullptr && body->kind == BodyKind::Station) {
                 if (const u32 updated = m_playerPrices.mergeNewer(m_traderPrices); updated > 0) {
                     addJournal(
                         context.now,
@@ -889,6 +957,21 @@ void Sandbox::onHyperspaceTransition(const HyperspaceTransition& event, const Ti
 
 void Sandbox::onShipDamaged(const ShipDamaged& event, const TickContext& context) {
     World& world = context.world;
+    const ShipIdentity* victim = world.components<ShipIdentity>().tryGet(event.ship);
+    if (event.attacker.isValid() && event.attacker == m_player && victim != nullptr &&
+        victim->faction == content::kFactionIndependent &&
+        std::none_of(m_offenses.begin(), m_offenses.end(),
+                     [&](const Offense& offense) { return offense.victim == event.ship; })) {
+        m_offenses.push_back({event.ship, context.now});
+        if (witnessedByTraders(m_player)) {
+            changeReputation(content::kReputationHit);
+            addJournal(context.now,
+                       std::format("Los comerciantes te identifican atacando a {}: reputación {:.0f}.",
+                                   victim->name, m_reputation));
+        } else {
+            addJournal(context.now, std::format("Atacas a {} sin que nadie te identifique.", victim->name));
+        }
+    }
     if (event.ship == m_player) {
         if (context.now - m_lastPlayerHit > kHitJournalGap) {
             addJournal(context.now, "¡Impacto! La nave está bajo fuego.");
@@ -953,6 +1036,16 @@ void Sandbox::onShipDestroyed(const ShipDestroyed& event, const TickContext& con
     }
     if (event.attacker.isValid() && event.attacker == m_player) {
         addJournal(now, "Objetivo destruido.");
+        if (const ShipIdentity* victim = world.components<ShipIdentity>().tryGet(event.ship)) {
+            if (victim->faction == content::kFactionPirates) {
+                changeReputation(content::kReputationPirateKill);
+                payBounty(context.world, victim->name, now);
+            } else if (victim->faction == content::kFactionIndependent && witnessedByTraders(m_player)) {
+                changeReputation(content::kReputationKill);
+                addJournal(now, std::format("Los comerciantes saben que destruiste a {}: reputación {:.0f}.",
+                                            victim->name, m_reputation));
+            }
+        }
     }
     if (const ShipIdentity* identity = world.components<ShipIdentity>().tryGet(event.ship)) {
         if (identity->faction == content::kFactionIndependent) {
@@ -1110,6 +1203,10 @@ void Sandbox::onTradeCommand(const TradeCommand& command, const TickContext& con
         reject("not docked at a port", "Para comerciar hay que estar atracado en un puerto.");
         return;
     }
+    if (hostile()) {
+        reject("hostile reputation", "El puerto se niega a comerciar contigo: tu reputación es hostil.");
+        return;
+    }
     Market& market = world.components<Market>().get(port);
     MarketGood* good = market.find(command.good);
     if (good == nullptr || command.tonnes == 0) {
@@ -1119,26 +1216,150 @@ void Sandbox::onTradeCommand(const TradeCommand& command, const TickContext& con
     const std::string& name = m_economy.goods()[command.good].name;
     const f64 base = m_economy.basePrice(command.good);
     if (command.tonnes > 0) {
-        const TradeResult bought = buyGoods(*good, base, static_cast<u32>(command.tonnes), *hold, *wallet);
+        const TradeResult bought =
+            buyGoods(*good, base, static_cast<u32>(command.tonnes), *hold, *wallet, content::kTradeTaxRate);
         if (bought.tonnes == 0) {
             reject("cannot buy", hold->space() == 0  ? "La bodega está llena."
                                  : good->stock < 1.0 ? "No quedan existencias."
                                                      : "No tienes créditos suficientes.");
             return;
         }
-        addJournal(context.now,
-                   std::format("Compras {} t de {} por {} cr.", bought.tonnes, name, bought.credits));
+        collectTax(bought.tax);
+        addJournal(context.now, std::format("Compras {} t de {} por {} cr (+{} cr de impuestos).",
+                                            bought.tonnes, name, bought.credits, bought.tax));
     } else {
-        const TradeResult sold = sellGoods(*good, base, static_cast<u32>(-command.tonnes), *hold, *wallet);
+        const TradeResult sold =
+            sellGoods(*good, base, static_cast<u32>(-command.tonnes), *hold, *wallet, content::kTradeTaxRate);
         if (sold.tonnes == 0) {
             reject("cannot sell", hold->amount(command.good) == 0 ? "No llevas ese bien."
                                                                   : "El puerto no admite más de ese bien.");
             return;
         }
-        addJournal(context.now, std::format("Vendes {} t de {} por {} cr.", sold.tonnes, name, sold.credits));
+        collectTax(sold.tax);
+        addJournal(context.now, std::format("Vendes {} t de {} por {} cr (-{} cr de impuestos).", sold.tonnes,
+                                            name, sold.credits, sold.tax));
     }
     ++m_stats.playerTrades;
     m_playerPrices.observe(port, market, m_economy.goods(), context.now);
+}
+
+void Sandbox::onBoardCommand(const BoardCommand& command, const TickContext& context) {
+    World& world = context.world;
+    const auto reject = [&](const char* reason, const char* message) {
+        ++m_stats.commandsRejected;
+        GX_LOG_WARN("Sandbox", "board command rejected: {}", reason);
+        addJournal(context.now, message);
+    };
+    const ShipIdentity* identity =
+        world.isAlive(command.ship) ? world.components<ShipIdentity>().tryGet(command.ship) : nullptr;
+    CargoHold* hold = world.components<CargoHold>().tryGet(command.ship);
+    const ShipModules* modules = world.components<ShipModules>().tryGet(command.ship);
+    if (identity == nullptr || identity->faction != content::kFactionPlayer || hold == nullptr ||
+        modules == nullptr || !hasPower(*modules)) {
+        reject("not a working ship of the player", "Tu nave no está en condiciones de abordar a nadie.");
+        return;
+    }
+    const SensorContact* contact = m_sensors.findContact(content::kFactionPlayer, command.track);
+    if (contact == nullptr || contact->ghost || !world.isAlive(contact->target)) {
+        reject("no ship there", "No encuentras ninguna nave en esa posición.");
+        return;
+    }
+    const EntityId victim = contact->target;
+    const Kinematics& mine = world.components<Kinematics>().get(command.ship);
+    const Kinematics& theirs = world.components<Kinematics>().get(victim);
+    if (length(theirs.position - mine.position) > content::kBoardingRange) {
+        reject("too far", "Demasiado lejos para abordar: acércate a menos de 5 km.");
+        return;
+    }
+    if (length(theirs.velocity - mine.velocity) > content::kBoardingSpeed) {
+        reject("too fast", "Iguala la velocidad con la otra nave para abordarla.");
+        return;
+    }
+    const ShipModules* victimModules = world.components<ShipModules>().tryGet(victim);
+    if (victimModules == nullptr || hasPower(*victimModules)) {
+        reject("still powered", "La nave resiste: no se puede abordar mientras tenga energía.");
+        return;
+    }
+
+    // Take what fits; the rest is lost with the abandoned hull.
+    std::string loot;
+    if (CargoHold* victimHold = world.components<CargoHold>().tryGet(victim)) {
+        for (const CargoItem& item : victimHold->items) {
+            const u32 taken = std::min(item.tonnes, hold->space());
+            hold->add(item.good, taken);
+            m_stats.cargoLost[item.good] += item.tonnes - taken;
+            if (taken > 0) {
+                loot += std::format("{}{} t de {}", loot.empty() ? "" : ", ", taken,
+                                    m_economy.goods()[item.good].name);
+            }
+        }
+    }
+    const ShipIdentity& victimIdentity = world.components<ShipIdentity>().get(victim);
+    addJournal(context.now,
+               std::format("Abordas {}: {}. La tripulación abandona la nave.", victimIdentity.name,
+                           loot.empty() ? "no lleva carga" : "te llevas " + loot));
+    ++m_stats.boardings;
+    if (victimIdentity.faction == content::kFactionIndependent) {
+        changeReputation(content::kReputationBoarding); // they always know who boarded them
+        addJournal(context.now, std::format("Los comerciantes lo saben: reputación {:.0f}.", m_reputation));
+        m_nextHaulerSpawn = std::max(m_nextHaulerSpawn, context.now + m_config.haulerRespawnDelay);
+    } else if (victimIdentity.faction == content::kFactionPirates) {
+        changeReputation(content::kReputationPirateKill);
+        payBounty(world, victimIdentity.name, context.now);
+        m_nextPirateSpawn = std::max(m_nextPirateSpawn, context.now + m_config.pirateRespawnDelay);
+    }
+    world.destroyEntity(victim); // Commands phase: structural changes are allowed here
+}
+
+void Sandbox::updatePayroll(const TickContext& context) {
+    // Crews are paid every minute, docked or not; a trader that cannot pay goes bankrupt at its next
+    // departure.
+    World& world = context.world;
+    for (const EntityId hauler : world.components<HaulerBrain>().entities()) {
+        if (Wallet* wallet = world.components<Wallet>().tryGet(hauler)) {
+            wallet->credits -= content::kHaulerWagesPerMinute;
+            m_stats.wagesPaid += content::kHaulerWagesPerMinute;
+        }
+    }
+}
+
+bool Sandbox::hostile() const {
+    return m_reputation <= content::kHostileReputation;
+}
+
+bool Sandbox::witnessedByTraders(EntityId ship) const {
+    // The traders' network knows who it has identified on its sensors (or by transponder).
+    for (const SensorContact& contact : m_sensors.picture(content::kFactionIndependent).contacts) {
+        if (!contact.ghost && contact.target == ship && contact.level == ContactLevel::Identified) {
+            return true;
+        }
+    }
+    return false;
+}
+
+void Sandbox::changeReputation(f64 delta) {
+    m_reputation = std::clamp(m_reputation + delta, -content::kMaxReputation, content::kMaxReputation);
+}
+
+void Sandbox::payBounty(World& world, const std::string& name, SimTime now) {
+    const i64 bounty = std::min(content::kPirateBounty, m_treasury);
+    if (bounty <= 0) {
+        addJournal(now, std::format("La Autoridad no tiene fondos para pagar la recompensa por {}.", name));
+        return;
+    }
+    m_treasury -= bounty;
+    m_stats.bountiesPaid += bounty;
+    if (Wallet* wallet = m_player.isValid() ? world.components<Wallet>().tryGet(m_player) : nullptr) {
+        wallet->credits += bounty;
+    } else {
+        m_playerCredits += bounty;
+    }
+    addJournal(now, std::format("Recompensa de la Autoridad: {} cr por {}.", bounty, name));
+}
+
+void Sandbox::collectTax(i64 tax) {
+    m_treasury += tax;
+    m_stats.taxesCollected += tax;
 }
 
 void Sandbox::updateFlightRate(const World& world, SimTime now) {
@@ -1215,6 +1436,9 @@ void Sandbox::writeState(BinaryWriter& writer) const {
     writer.io(m_journal);
     writer.io(m_stats);
     writer.io(m_playerCredits);
+    writer.io(m_treasury);
+    writer.io(m_reputation);
+    writer.io(m_offenses);
     writer.io(m_playerPrices);
     writer.io(m_traderPrices);
     writer.io(m_danger);
@@ -1232,6 +1456,9 @@ void Sandbox::readState(BinaryReader& reader) {
     reader.io(m_journal);
     reader.io(m_stats);
     reader.io(m_playerCredits);
+    reader.io(m_treasury);
+    reader.io(m_reputation);
+    reader.io(m_offenses);
     reader.io(m_playerPrices);
     reader.io(m_traderPrices);
     reader.io(m_danger);

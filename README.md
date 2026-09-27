@@ -3,7 +3,7 @@
 Motor propio en C++20 para un sandbox 4X de simulación galáctica persistente: la galaxia existe, cambia y
 produce consecuencias aunque el jugador no la esté mirando.
 
-**Estado: M3 (Economía mínima y comercio).** Con él el primer vertical slice está completo. Hay un juego en
+**Estado: M3.1 (Consecuencias).** El primer vertical slice está completo. Hay un juego en
 tiempo real (×1, ×3, ×10):
 
 - un sistema estelar generado con órbitas keplerianas;
@@ -22,6 +22,11 @@ reapariciones.
 En la economía, cada puerto produce, consume y fija precios según sus existencias, en una cadena que va de
 la extracción a la refinería, la fábrica y la maquinaria. Los cargueros comercian con lo que sabe su red, y
 tú compras y vendes al atracar. Las pérdidas por piratería se notan en la escasez y en los precios.
+
+Todo tiene consecuencias. La Autoridad del sistema cobra impuestos y reparaciones y paga recompensas por
+piratas, y los comerciantes pagan salarios y pueden quebrar. Tu reputación cae si los comerciantes te
+identifican atacándolos (con el transpondedor apagado y a distancia pueden no saberlo), y puedes abordar
+naves sin energía para llevarte su carga.
 
 Por debajo están el kernel de M1 (entidades, eventos, comandos, save/load, replay, LOD por frecuencia) y la
 fase 0. El diseño es provisional
@@ -60,7 +65,7 @@ Presets: `debug` (sin optimizar, con asserts), `release` (optimizado, para bench
 ```
 
 Controles: rueda = zoom · arrastrar = mover · clic = seleccionar · **clic derecho = ir allí** ·
-WASD = empuje manual · X = frenar · E = atacar el contacto seleccionado · C = alto el fuego ·
+WASD = empuje manual · X = frenar · E = atacar el contacto seleccionado · C = alto el fuego · B = abordar ·
 R/T = radar/transpondedor · ventana Mercado al atracar · Espacio = pausa · 1/2/3 = ×1 (tiempo real)/×3/×10 · H/F = seguir ·
 F5/F9 = guardar/cargar · F3 = depuración · F1 = ayuda. La primera configuración descarga SDL3 y Dear ImGui
 (versiones fijadas); `-DGX_BUILD_CLIENT=OFF` compila sin el cliente.
@@ -116,5 +121,5 @@ cmake/ scripts/ tools/
   combate, economía, NPC, controles).
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md): capas, tiempo, pipeline, presentación, threading,
   entidades, eventos, comandos, persistencia, determinismo, LOD, referencias, contradicciones y riesgos.
-- [docs/DECISIONS.md](docs/DECISIONS.md): registro de decisiones (ADR-001 a ADR-028).
+- [docs/DECISIONS.md](docs/DECISIONS.md): registro de decisiones (ADR-001 a ADR-029).
 - [docs/BENCHMARKS.md](docs/BENCHMARKS.md): método y resultados medidos por hito.

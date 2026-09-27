@@ -335,6 +335,13 @@ void printEconomy(const Simulation& simulation, const Sandbox& sandbox, bool per
         static_cast<unsigned long long>(stats.repositionTrips),
         static_cast<unsigned long long>(stats.explorationTrips), static_cast<long long>(haulerCredits),
         world.components<HaulerBrain>().size());
+    std::printf(
+        "money: treasury %lld | taxes %lld, repairs %lld, bounties %lld | wages %lld | bankruptcies %llu, "
+        "boardings %llu\n",
+        static_cast<long long>(sandbox.treasury()), static_cast<long long>(stats.taxesCollected),
+        static_cast<long long>(stats.repairFees), static_cast<long long>(stats.bountiesPaid),
+        static_cast<long long>(stats.wagesPaid), static_cast<unsigned long long>(stats.bankruptcies),
+        static_cast<unsigned long long>(stats.boardings));
     if (!perPort) {
         return;
     }

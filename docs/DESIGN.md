@@ -6,7 +6,7 @@
 > (`Game/Sandbox/Content.h`) o en parámetros de generación, no dispersos por los sistemas, para que moverlos
 > a ficheros de datos (modding) sea un cambio local.
 
-## Estado: slice M3 "Economía mínima y comercio"
+## Estado: slice M3.1 "Consecuencias"
 
 Se puede:
 
@@ -17,12 +17,15 @@ Se puede:
 - **combatir** (M2.3): armas que disparan a pistas de sensores, daño por módulos, piratas que cazan
   cargueros, reparaciones y reapariciones;
 - **comerciar** (M3): cada puerto tiene un mercado con producción, consumo y precios que siguen a las
-  existencias; los cargueros compran y venden por beneficio, y el jugador también.
+  existencias; los cargueros compran y venden por beneficio, y el jugador también;
+- **cargar con las consecuencias** (M3.1): impuestos y reparaciones de pago a la Autoridad del sistema,
+  salarios y quiebras de los comerciantes, recompensas por piratas, reputación según lo que los
+  comerciantes han visto, y abordaje de naves sin energía.
 
 Con esto el primer vertical slice del prompt (§5) está completo.
 
-**Todavía no hay:** salarios, impuestos, crédito ni quiebras; misiles ni defensa puntual; facciones
-políticas; más de un sistema estelar.
+**Todavía no hay:** crédito, deuda, seguros ni inversión; policía o patrullas; misiles ni defensa puntual;
+facciones políticas; más de un sistema estelar.
 
 ## Escala, unidades y tiempo
 
@@ -98,7 +101,10 @@ minuto a ×10).
 - **Radar (R)**: identifica un carguero a unos 3,5 millones de km con buena precisión, pero su emisión te
   hace visible a unos 7 millones de km.
 - **Transpondedor (T)**: difunde tu identidad y posición hasta 1 UA. Los cargueros lo llevan encendido. Si
-  lo apagas, cuesta mucho más identificarte (más adelante tendrá consecuencias legales).
+  lo apagas, cuesta mucho más identificarte.
+- **Identificar sin transpondedor** exige una señal clara (SNR pasivo ≥ 400, o SNR de radar ≥ 4). Un
+  Correo quieto es identificado por un carguero a unos 1.100 km, clasificado a unos 11.000 km y detectado a
+  unos 44.700 km (ADR-029).
 - **Contactos**: desconocido (?), clasificado ("Carguero?") o identificado (nombre), con círculo de
   incertidumbre. Si dejan de detectarse se atenúan y se pierden a los 20 s. El ruido crea a veces contactos
   fantasma que desaparecen.
@@ -235,6 +241,54 @@ cada 20 minutos.
 - Seleccionando un puerto ves los precios que conoces y su antigüedad.
 - Si te destruyen, pierdes la carga pero no los créditos.
 
+## Consecuencias (ADR-029)
+
+**La Autoridad del sistema** (las estaciones y los puertos) tiene tesorería propia. Empieza con 20.000 cr.
+
+- Cobra un **3 % de impuesto** sobre cada tonelada comprada o vendida. Lo paga el comerciante, encima del
+  precio al comprar y descontado al vender.
+- Cobra las **reparaciones en estación**: 3 cr por punto de salud reparado. Sin dinero no hay reparación.
+- Paga **recompensas** de 1.500 cr por cada pirata destruido o capturado por el jugador, mientras le
+  queden fondos.
+
+**Tripulaciones.**
+
+- Cada carguero paga 5 cr por minuto de salarios (300 cr/h), en puerto o en ruta.
+- Un comerciante en números rojos **quiebra** al intentar salir de puerto: vende lo que tiene, abandona el
+  sistema y otro lo sustituye más tarde (con capital nuevo).
+
+**Reputación con la Autoridad y los comerciantes** (−100 a 100; empieza en 0):
+
+| Acción | Cambio |
+|---|---|
+| Atacar un carguero, si su red te identifica (un golpe por nave cada 60 s) | −10 |
+| Destruir un carguero, si te identifican | −30 |
+| Abordar un carguero (siempre saben quién fue) | −20 |
+| Destruir o capturar un pirata | +5 |
+| Con el tiempo, si es negativa | +0,5 por minuto hacia 0 |
+
+- **Testigos, no omnisciencia:** la reputación solo cae si la red de comerciantes te tiene *identificado*
+  en sus sensores en ese momento.
+- Con el transpondedor apagado, quieto y disparando con el cañón de riel desde 1.100–3.000 km, puedes
+  atacar sin que sepan quién eres. A cambio, sin radar la puntería es mala: el radar te delataría.
+- Con reputación **hostil** (−30 o menos), los puertos no comercian contigo, las estaciones no te reparan
+  ni te dan su boletín de precios.
+
+**Abordaje (B).** A una nave **sin energía** (reactor fuera de servicio), a menos de 5 km y con la
+velocidad igualada (±200 m/s):
+
+- te llevas la carga que quepa en tu bodega, y el resto se pierde;
+- la tripulación abandona la nave, que desaparece;
+- capturar así a un pirata también paga recompensa.
+
+**Medido** (10 h, semilla 2400, 3 piratas):
+
+- la tesorería pasa de 20.000 a ~94.000 cr (44.500 de impuestos y 29.500 de reparaciones);
+- los salarios retiran 35.900 cr;
+- hay 3 quiebras.
+
+La tesorería solo crece: el paso natural es que pague **patrullas** contra los piratas (pendiente).
+
 ## Facciones y personajes (mínimo)
 
 - **Jugador** (verde), **Transportistas independientes** (azul) y **Piratas** (rojo). La política, las
@@ -284,6 +338,7 @@ cada 20 minutos.
 | Alto el fuego | C |
 | Interceptar sin disparar | botón en la selección del contacto |
 | Comprar / vender | ventana Mercado, atracado en un puerto (+1, +10, −1, Todo) |
+| Abordar el contacto seleccionado (sin energía, a < 5 km, velocidad igualada) | B |
 | Pausa / velocidad | Espacio / 1 (×1), 2 (×3), 3 (×10) |
 | Seguir tu nave / la selección | H / F |
 | Guardar / cargar | F5 / F9 |
@@ -304,12 +359,11 @@ cada 20 minutos.
 
 ## Pendiente de decidir (para `game.md` o para próximos slices)
 
-1. Consecuencias de apagar el transpondedor (ley, reputación) y guerra electrónica.
-2. Misiles, defensa puntual, blindaje o escudos, y abordaje con botín de las naves sin energía.
-3. Consecuencias de atacar a cargueros o a otras facciones: reputación, policía de las estaciones y
-   recompensas por piratas.
-4. Economía completa (§18): salarios, impuestos, crédito, deuda, seguros, inversión y quiebra. Ahora el
-   dinero de los comerciantes solo crece; faltan sumideros (costes de operación).
+1. Guerra electrónica (interferencias, señuelos) y consecuencias legales directas de ir sin transpondedor.
+2. Misiles, defensa puntual, blindaje o escudos.
+3. Patrullas de la Autoridad pagadas con la tesorería; policía que persigue al jugador hostil; piratas que
+   saquean en lugar de destruir.
+4. Resto de la economía del §18: crédito, deuda, seguros e inversión (comerciantes que compran naves).
 5. Población con efectos: la escasez debería afectar a la estabilidad y al crecimiento.
 6. Viaje entre sistemas y la estructura de la galaxia.
 7. Nombre del juego, tono y estética definitiva.

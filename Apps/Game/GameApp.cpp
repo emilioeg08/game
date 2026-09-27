@@ -386,6 +386,10 @@ void GameApp::submitTrade(GoodId good, i32 tonnes) {
     simulation().submitCommand(TradeCommand{sandbox().playerShip(), good, tonnes});
 }
 
+void GameApp::submitBoard(u32 track) {
+    simulation().submitCommand(BoardCommand{sandbox().playerShip(), track});
+}
+
 void GameApp::handleKeyboard() {
     const ImGuiIO& io = ImGui::GetIO();
     if (io.WantCaptureKeyboard) {
@@ -430,6 +434,9 @@ void GameApp::handleKeyboard() {
     }
     if (ImGui::IsKeyPressed(ImGuiKey_E, false) && m_selectedContact != 0) {
         submitEngage(m_selectedContact, true, true);
+    }
+    if (ImGui::IsKeyPressed(ImGuiKey_B, false) && m_selectedContact != 0) {
+        submitBoard(m_selectedContact);
     }
     if (ImGui::IsKeyPressed(ImGuiKey_C, false)) {
         submitEngage(0, false, false);
@@ -560,6 +567,15 @@ void GameApp::drawShipPanel() {
     if (!cargo.empty()) {
         ImGui::TextDisabled("Carga: %s", cargo.c_str());
     }
+    const f64 reputation = m_snapshot.playerReputation;
+    const char* standing = m_snapshot.playerHostile ? "hostil: los puertos no te atienden"
+                           : reputation <= -10.0    ? "sospechosa"
+                           : reputation >= 20.0     ? "respetada"
+                                                    : "neutral";
+    ImGui::TextColored(m_snapshot.playerHostile ? color(255, 100, 90)
+                       : reputation <= -10.0    ? color(230, 180, 80)
+                                                : color(170, 200, 230),
+                       "Reputación: %.0f (%s)", reputation, standing);
     ImGui::Separator();
     const f64 acceleration = length(ship->acceleration);
     ImGui::Text("Velocidad:    %s", formatSpeed(length(ship->velocity)).c_str());
@@ -689,8 +705,12 @@ void GameApp::drawMarketWindow() {
     for (const CargoItem& item : m_snapshot.playerCargo) {
         used += item.tonnes;
     }
-    ImGui::TextDisabled("  ·  bodega %u / %u t  ·  compras a la izquierda, ventas a la derecha", used,
-                        m_snapshot.playerCargoCapacity);
+    ImGui::TextDisabled("  ·  bodega %u / %u t  ·  impuesto %.0f %%", used, m_snapshot.playerCargoCapacity,
+                        content::kTradeTaxRate * 100.0);
+    if (m_snapshot.playerHostile) {
+        ImGui::TextColored(color(255, 100, 90),
+                           "El puerto se niega a comerciar contigo: tu reputación es hostil.");
+    }
     if (ImGui::BeginTable("market", 7, ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingStretchProp)) {
         ImGui::TableSetupColumn("Bien");
         ImGui::TableSetupColumn("Existencias");
@@ -860,6 +880,11 @@ void GameApp::drawContactSelection(const ContactView& contact) {
     } else if (ImGui::Button("Atacar (E)")) {
         submitEngage(contact.trackId, true, true);
     }
+    ImGui::SameLine();
+    if (ImGui::Button("Abordar (B)")) {
+        submitBoard(contact.trackId);
+    }
+    ImGui::TextDisabled("Abordar: a menos de 5 km, velocidad igualada y la otra nave sin energía.");
     if (m_showTruth && contact.ghost) {
         ImGui::TextColored(color(255, 90, 200), "[depuración] contacto fantasma: no existe");
     }
@@ -1028,6 +1053,12 @@ void GameApp::drawDebugPanel() {
     ImGui::Text("Vuelo y combate (LOD): paso de %s", formatDuration(flight.desc.period).c_str());
     const CombatStats& combat = sandbox().combat().stats();
     const SandboxStats& game = sandbox().stats();
+    ImGui::Text("Autoridad: tesorería %lld cr · impuestos %lld · reparaciones %lld · recompensas %lld",
+                static_cast<long long>(m_snapshot.treasury), static_cast<long long>(game.taxesCollected),
+                static_cast<long long>(game.repairFees), static_cast<long long>(game.bountiesPaid));
+    ImGui::Text("Salarios pagados %lld cr · quiebras %llu · abordajes %llu",
+                static_cast<long long>(game.wagesPaid), static_cast<unsigned long long>(game.bankruptcies),
+                static_cast<unsigned long long>(game.boardings));
     ImGui::Text("Combate: %llu disparos, %llu impactos, %llu naves destruidas",
                 static_cast<unsigned long long>(combat.shotsFired),
                 static_cast<unsigned long long>(combat.hits),
@@ -1094,7 +1125,11 @@ void GameApp::drawHelp() {
     ImGui::BulletText("Viajes largos: salto al hiperespacio fuera de los pozos gravitatorios (círculos)");
     ImGui::BulletText(
         "R: radar (ves más, pero te ven de lejos)   ·   T: transpondedor (difunde tu identidad)");
-    ImGui::BulletText("E: atacar el contacto seleccionado (lo persigue y dispara)   ·   C: alto el fuego");
+    ImGui::BulletText(
+        "E: atacar el contacto seleccionado (lo persigue y dispara)   ·   C: alto el fuego   ·   "
+        "B: abordar");
+    ImGui::BulletText(
+        "Recompensa por piratas; si los comerciantes te identifican atacándolos, pierdes reputación");
     ImGui::BulletText("Los piratas acechan junto a los pozos; cerca de las estaciones estás a salvo");
     ImGui::BulletText("Atracado en un puerto: compra y vende en la ventana Mercado. Las estaciones te dan el "
                       "boletín de precios de los comerciantes");

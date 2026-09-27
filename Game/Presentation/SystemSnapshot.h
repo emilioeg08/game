@@ -144,6 +144,9 @@ struct SystemSnapshot {
     bool tactical = false; // fine flight/combat steps
     // Economy.
     i64 playerCredits = 0;
+    f64 playerReputation = 0.0;
+    bool playerHostile = false; // ports refuse the player
+    i64 treasury = 0;           // the Authority's (debug)
     u32 playerCargoCapacity = 0;
     std::vector<CargoItem> playerCargo;
     EntityId dockedPort; // the port whose market the player can trade at, or invalid

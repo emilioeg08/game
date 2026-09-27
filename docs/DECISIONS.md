@@ -348,3 +348,36 @@ sustituya y explique por qué.
      repitiendo hasta estabilizar).
   4. Un bug de herramienta, no de diseño: un parche hecho con PowerShell 5.1 guardó texto con la
      codificación rota ("BoletÃ­n"). El test del boletín lo detectó.
+
+## ADR-029 — Consecuencias: Autoridad, salarios, recompensas, reputación con testigos y abordaje
+
+- **Contexto:** prompt §18 (salarios, impuestos, quiebra), §30 (causalidad) y el primer slice (§5):
+  combatir y comerciar deben tener consecuencias.
+- **Decisión:**
+  - La Autoridad del sistema tiene tesorería. Cobra el 3 % de cada operación (`buyGoods`/`sellGoods`
+    con `taxRate`) y las reparaciones en estación (3 cr por punto), y paga recompensas por piratas al
+    jugador.
+  - Los comerciantes pagan salarios cada minuto (`Game.Payroll`). Si están en números rojos al salir de
+    puerto, quiebran y se retiran en `Game.Upkeep`.
+  - La reputación del jugador solo cambia por hechos que la red de comerciantes ha **visto**: al atacar a
+    un carguero, cuenta si su `FactionPicture` tiene al jugador *identificado*. Los golpes repetidos a la
+    misma nave cuentan una vez por minuto.
+  - Con reputación hostil, los puertos niegan comercio, reparaciones y boletín.
+  - El abordaje es un comando (`BoardCommand`, validado): la nave objetivo debe estar sin energía, a menos
+    de 5 km y con la velocidad igualada. La carga pasa a tu bodega (lo que no cabe se contabiliza como
+    perdido) y el casco se retira en la fase de comandos.
+  - **Cambio en ADR-023:** la identificación pasiva pasa de SNR 25 a 400. Con 25, un carguero identificaba
+    a un Correo quieto a 4.470 km, más allá del alcance de cualquier arma: el anonimato era imposible y la
+    regla de testigos no significaba nada. Con 400 hay una ventana real (cañón de riel a 1.100–3.000 km,
+    con mala puntería sin radar).
+- **Verificado:**
+  - impuesto exacto por tonelada;
+  - reparaciones cobradas y denegadas sin fondos;
+  - quiebra con reemplazo;
+  - recompensa y reputación al destruir un pirata;
+  - reputación solo con testigo: −10 con el transpondedor encendido a 150 km, 0 con él apagado a 2.000 km;
+  - abordaje (20 t tomadas, 30 perdidas, nave con energía rechazada) y hostilidad tras dos abordajes;
+  - conservación de bienes intacta.
+- **Medido:** a 4 h, 6 piratas dan *más* entregas que ninguno: el capital nuevo de los cargueros de
+  reemplazo lo enmascara. A 8 h la relación es robusta (12.192 frente a 9.090 t), y la prueba causal pasó
+  a 8 h.

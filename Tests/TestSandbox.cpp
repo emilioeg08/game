@@ -275,7 +275,8 @@ GX_TEST(Sandbox, StationsRepairAndDamageControlRestoresPower) {
     const EntityId player = session.sandbox.playerShip();
     const auto modules = [&]() -> ShipModules& { return world.components<ShipModules>().get(player); };
 
-    // Docked at the home station: everything is patched up at 2% per second.
+    // Docked at the home station: everything is patched up at 2% per second (paid: give it the money).
+    world.components<Wallet>().get(player).credits = 100'000;
     for (ShipModule& module : modules().modules) {
         module.health = module.maxHealth * 0.3;
     }
@@ -412,12 +413,17 @@ GX_TEST(Sandbox, HaulersTradeAtAProfit) {
     Session session(3, peaceful());
     session.sandbox.populate(session.simulation);
     const World& world = session.simulation.world();
-    session.simulation.runFor(SimDuration::hours(3));
-    i64 credits = 0;
+    session.simulation.runFor(SimDuration::hours(4));
+    // Net worth: money plus the cargo being carried (at base prices), after taxes and wages.
+    f64 worth = 0.0;
     for (const EntityId hauler : world.components<HaulerBrain>().entities()) {
-        credits += world.components<Wallet>().get(hauler).credits;
+        worth += static_cast<f64>(world.components<Wallet>().get(hauler).credits);
+        for (const CargoItem& item : world.components<CargoHold>().get(hauler).items) {
+            worth += item.tonnes * session.sandbox.economy().basePrice(item.good);
+        }
     }
-    GX_EXPECT(credits > content::kHaulerStartCredits * static_cast<i64>(session.sandbox.config().haulers));
+    GX_EXPECT(worth > static_cast<f64>(content::kHaulerStartCredits * session.sandbox.config().haulers));
+    GX_EXPECT(session.sandbox.stats().wagesPaid > 0);
     GX_EXPECT(session.sandbox.stats().tonnesDelivered > 1'000);
 }
 
@@ -428,7 +434,8 @@ GX_TEST(Sandbox, PiratesDisruptTheSupplyChain) {
         config.pirates = pirates;
         Session session(3, config);
         session.sandbox.populate(session.simulation);
-        session.simulation.runFor(SimDuration::hours(4));
+        // Eight hours: over shorter runs the newcomers' fresh capital masks the losses (measured).
+        session.simulation.runFor(SimDuration::hours(8));
         u64 lost = 0;
         for (const u64 tonnes : session.sandbox.stats().cargoLost) {
             lost += tonnes;
@@ -520,4 +527,195 @@ GX_TEST(Sandbox, StationsPublishTheTradersPriceBulletin) {
         fresher += known.observed > SimTime::epoch() ? 1u : 0u;
     }
     GX_EXPECT(fresher > 1); // not just the station it docked at
+}
+
+namespace {
+
+// Puts a hauler right next to the player (same velocity), disabled or not, with some cargo.
+EntityId parkHaulerNextToPlayer(Session& session, usize which, bool disabled, u32 water) {
+    World& world = session.simulation.world();
+    const EntityId player = session.sandbox.playerShip();
+    const EntityId hauler = world.components<HaulerBrain>().entities()[which];
+    const Kinematics& mine = world.components<Kinematics>().get(player);
+    world.components<Kinematics>().get(hauler) = {
+        mine.position + Vec3d{1'000.0 * (which + 1), 0.0, 0.0}, mine.velocity, {}};
+    world.components<ShipControl>().get(hauler) = {}; // drifting
+    world.components<HaulerBrain>().get(hauler).departAt = session.simulation.now() + SimDuration::hours(5);
+    world.components<CargoHold>().get(hauler).items = {{content::kGoodWater, water}};
+    if (disabled) {
+        for (ShipModule& module : world.components<ShipModules>().get(hauler).modules) {
+            module.health = module.type == ModuleType::Reactor ? 0.0 : module.health;
+        }
+        world.components<ShipModules>().get(hauler).lastDamaged =
+            session.simulation.now(); // no damage control yet
+        applyModuleEffects(world, hauler);
+    }
+    return hauler;
+}
+
+u32 trackOf(const Session& session, EntityId target) {
+    for (const SensorContact& contact : session.sandbox.sensors().picture(content::kFactionPlayer).contacts) {
+        if (contact.target == target && !contact.ghost) {
+            return contact.trackId;
+        }
+    }
+    return 0;
+}
+
+} // namespace
+
+GX_TEST(Sandbox, TradesPayTaxToTheAuthority) {
+    Session session(0, peaceful());
+    session.sandbox.populate(session.simulation);
+    const World& world = session.simulation.world();
+    const EntityId player = session.sandbox.playerShip();
+    const Market& market = world.components<Market>().get(session.sandbox.dockedPort(world, player));
+    const i64 treasury = session.sandbox.treasury();
+    const i64 price =
+        buyPrice(market.goods.front(), session.sandbox.economy().basePrice(market.goods.front().good));
+    session.simulation.submitCommand(TradeCommand{player, market.goods.front().good, 1});
+    session.simulation.runFor(SimDuration::milliseconds(10));
+    const i64 tax = session.sandbox.treasury() - treasury;
+    GX_EXPECT_EQ(tax, std::llround(static_cast<f64>(price) * content::kTradeTaxRate));
+    GX_EXPECT_EQ(world.components<Wallet>().get(player).credits, content::kPlayerStartCredits - price - tax);
+    GX_EXPECT(session.journalContains("de impuestos"));
+}
+
+GX_TEST(Sandbox, StationRepairsAreChargedAndNeedMoney) {
+    Session session(0, peaceful());
+    session.sandbox.populate(session.simulation);
+    World& world = session.simulation.world();
+    const EntityId player = session.sandbox.playerShip();
+    ShipModule& structure = world.components<ShipModules>().get(player).modules[0];
+    structure.health = structure.maxHealth - 100.0; // 100 points to repair
+    const i64 treasury = session.sandbox.treasury();
+    session.simulation.runFor(SimDuration::seconds(30));
+    const i64 paid = content::kPlayerStartCredits - world.components<Wallet>().get(player).credits;
+    GX_EXPECT_NEAR(structure.fraction(), 1.0, 1e-9);
+    GX_EXPECT(std::abs(paid - static_cast<i64>(100.0 * content::kRepairCostPerPoint)) <=
+              12); // per-second rounding
+    GX_EXPECT_EQ(session.sandbox.treasury() - treasury, paid);
+
+    // Broke: no repairs.
+    world.components<Wallet>().get(player).credits = 0;
+    structure.health = structure.maxHealth - 100.0;
+    session.simulation.runFor(SimDuration::seconds(30));
+    GX_EXPECT_NEAR(structure.health, structure.maxHealth - 100.0, 1e-9);
+}
+
+GX_TEST(Sandbox, BrokeTradersRetireAndAreReplaced) {
+    Session session(0, peaceful());
+    session.sandbox.populate(session.simulation);
+    World& world = session.simulation.world();
+    const EntityId hauler = world.components<HaulerBrain>().entities()[0];
+    world.components<Wallet>().get(hauler).credits = -1;
+    world.components<HaulerBrain>().get(hauler).departAt = session.simulation.now();
+    world.components<ShipControl>().get(hauler).arrived = true;
+    session.simulation.runFor(SimDuration::seconds(20));
+    GX_EXPECT(!world.isAlive(hauler));
+    GX_EXPECT_EQ(session.sandbox.stats().bankruptcies, 1u);
+    GX_EXPECT(session.journalContains("quiebra"));
+    session.simulation.runFor(SimDuration::seconds(70)); // a newcomer after the respawn delay
+    GX_EXPECT_EQ(world.components<HaulerBrain>().size(),
+                 static_cast<usize>(session.sandbox.config().haulers));
+    GX_EXPECT(session.sandbox.stats().wagesPaid > 0);
+}
+
+GX_TEST(Sandbox, DestroyingAPiratePaysABounty) {
+    SandboxConfig config;
+    config.haulers = 0;
+    config.pirates = 1;
+    Session session(0, config);
+    session.sandbox.populate(session.simulation);
+    World& world = session.simulation.world();
+    const EntityId player = session.sandbox.playerShip();
+    const EntityId pirate = world.components<PirateBrain>().entities()[0];
+    session.pilot(FlightMode::Stop);
+    session.simulation.runFor(SimDuration::milliseconds(10));
+    const Vec3d spot{0.0, 0.0, 5e10};
+    world.components<Kinematics>().get(player) = {spot, {}, {}};
+    world.components<Kinematics>().get(pirate) = {spot + Vec3d{150'000.0, 0.0, 0.0}, {}, {}};
+    world.components<ShipControl>().get(pirate).point = spot + Vec3d{150'000.0, 0.0, 0.0};
+    world.components<ShipModules>().get(pirate).modules[0].health = 1.0;
+    session.simulation.runFor(SimDuration::seconds(2)); // the player's sensors pick it up
+    const u32 track = trackOf(session, pirate);
+    GX_REQUIRE(track != 0);
+    session.simulation.submitCommand(EngageCommand{player, track, true, false});
+    session.simulation.runFor(SimDuration::seconds(20));
+    GX_EXPECT(!world.isAlive(pirate));
+    GX_EXPECT_EQ(session.sandbox.stats().bountiesPaid, content::kPirateBounty);
+    GX_EXPECT(world.components<Wallet>().get(player).credits >=
+              content::kPlayerStartCredits + content::kPirateBounty);
+    GX_EXPECT_NEAR(session.sandbox.reputation(), content::kReputationPirateKill, 1e-9);
+    GX_EXPECT(session.journalContains("Recompensa"));
+}
+
+GX_TEST(Sandbox, OnlyIdentifiedAttacksCostReputation) {
+    const auto attack = [](bool transponder, f64 range) {
+        SandboxConfig config;
+        config.pirates = 0;
+        Session session(0, config);
+        session.sandbox.populate(session.simulation);
+        World& world = session.simulation.world();
+        const EntityId player = session.sandbox.playerShip();
+        session.simulation.submitCommand(SensorCommand{player, false, transponder});
+        session.pilot(FlightMode::Stop);
+        session.simulation.runFor(SimDuration::milliseconds(10));
+        const Vec3d spot{0.0, 0.0, 5e10};
+        world.components<Kinematics>().get(player) = {spot, {}, {}};
+        const EntityId hauler = world.components<HaulerBrain>().entities()[0];
+        world.components<Kinematics>().get(hauler) = {spot + Vec3d{range, 0.0, 0.0}, {}, {}};
+        world.components<ShipControl>().get(hauler) = {};
+        world.components<HaulerBrain>().get(hauler).departAt =
+            session.simulation.now() + SimDuration::hours(5);
+        session.simulation.runFor(SimDuration::seconds(30)); // old sightings of the player time out
+        // A precise passive lock without radar (which would give the shooter away): a test-only sensor
+        // upgrade, so that the railgun hits a quiet target at long range and the test is about witnesses.
+        world.components<SensorSuite>().get(player).passiveSensitivity = 1e15;
+        const u32 track = trackOf(session, hauler);
+        if (track == 0) {
+            return 999.0;
+        }
+        session.simulation.submitCommand(EngageCommand{player, track, true, false});
+        session.simulation.runFor(SimDuration::seconds(10));
+        GX_EXPECT(session.sandbox.combat().stats().hits > 0);
+        return session.sandbox.reputation();
+    };
+    // Transponder on at 150 km: the victim's network knows exactly who it is.
+    GX_EXPECT_NEAR(attack(true, 150'000.0), content::kReputationHit, 0.2); // recovering slowly since
+    // Transponder off, idle, railgun from 2,000 km: the victim classifies a courier but cannot name it.
+    GX_EXPECT_NEAR(attack(false, 2'000'000.0), 0.0, 1e-9);
+}
+
+GX_TEST(Sandbox, BoardingTakesCargoAndCostsReputation) {
+    Session session(0, peaceful());
+    session.sandbox.populate(session.simulation);
+    World& world = session.simulation.world();
+    const EntityId player = session.sandbox.playerShip();
+    const EntityId powered = parkHaulerNextToPlayer(session, 0, false, 10);
+    const EntityId victim = parkHaulerNextToPlayer(session, 1, true, 50);
+    const EntityId second = parkHaulerNextToPlayer(session, 2, true, 0);
+    session.simulation.runFor(
+        SimDuration::milliseconds(1'100)); // their transponders reach the player's picture
+
+    session.simulation.submitCommand(
+        BoardCommand{player, trackOf(session, powered)}); // it fights back: refused
+    session.simulation.submitCommand(BoardCommand{player, trackOf(session, victim)});
+    session.simulation.runFor(SimDuration::milliseconds(100));
+    GX_EXPECT(world.isAlive(powered));
+    GX_EXPECT(!world.isAlive(victim));
+    GX_EXPECT(session.journalContains("resiste"));
+    GX_EXPECT_EQ(world.components<CargoHold>().get(player).amount(content::kGoodWater), 20u); // hold is 20 t
+    GX_EXPECT_EQ(session.sandbox.stats().cargoLost[content::kGoodWater], 30u); // the rest is lost
+    GX_EXPECT_NEAR(session.sandbox.reputation(), content::kReputationBoarding, 1e-6);
+
+    // A second boarding makes the player hostile: the port refuses to trade.
+    session.simulation.submitCommand(BoardCommand{player, trackOf(session, second)});
+    session.simulation.runFor(SimDuration::milliseconds(100));
+    GX_EXPECT(session.sandbox.hostile());
+    session.simulation.submitCommand(TradeCommand{player, content::kGoodWater, -1});
+    session.simulation.runFor(SimDuration::milliseconds(100));
+    GX_EXPECT(session.journalContains("se niega a comerciar"));
+    GX_EXPECT_EQ(world.components<CargoHold>().get(player).amount(content::kGoodWater), 20u);
+    GX_EXPECT_EQ(session.sandbox.stats().boardings, 2u);
 }

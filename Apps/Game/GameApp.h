@@ -67,6 +67,7 @@ private:
     void submitSensors(bool activeOn, bool transponderOn);
     void submitEngage(u32 track, bool fire, bool pursue);
     void submitTrade(GoodId good, i32 tonnes);
+    void submitBoard(u32 track);
 
     void drawTimeBar();
     void drawShipPanel();

@@ -109,17 +109,31 @@ struct TradeCommand {
     }
 };
 
+// Player input: board a disabled ship next to yours (a sensor track) and take its cargo.
+struct BoardCommand {
+    EntityId ship;
+    u32 track = 0;
+
+    template <typename Archive>
+    void io(Archive& ar) {
+        ar.io("ship", ship);
+        ar.io("track", track);
+    }
+};
+
 // NPC hauler behaviour state: wait at a port, then fly to another one.
 struct HaulerBrain {
     SimTime departAt;
     EntityId lastPort;
     u32 trips = 0;
+    bool retiring = false; // bankrupt: leaves the system instead of departing
 
     template <typename Archive>
     void io(Archive& ar) {
         ar.io("departAt", departAt);
         ar.io("lastPort", lastPort);
         ar.io("trips", trips);
+        ar.io("retiring", retiring);
     }
 };
 
@@ -170,6 +184,12 @@ struct SandboxStats {
     u64 repositionTrips = 0;  // haulers flying empty to where a known bargain is
     u64 playerTrades = 0;
     std::vector<u64> cargoLost; // tonnes by good, lost with destroyed ships
+    i64 taxesCollected = 0;
+    i64 wagesPaid = 0;
+    i64 repairFees = 0;
+    i64 bountiesPaid = 0;
+    u64 bankruptcies = 0;
+    u64 boardings = 0;
 
     template <typename Archive>
     void io(Archive& ar) {
@@ -188,6 +208,12 @@ struct SandboxStats {
         ar.io("repositionTrips", repositionTrips);
         ar.io("playerTrades", playerTrades);
         ar.io("cargoLost", cargoLost);
+        ar.io("taxesCollected", taxesCollected);
+        ar.io("wagesPaid", wagesPaid);
+        ar.io("repairFees", repairFees);
+        ar.io("bountiesPaid", bountiesPaid);
+        ar.io("bankruptcies", bankruptcies);
+        ar.io("boardings", boardings);
     }
 };
 
@@ -202,6 +228,18 @@ struct PortDanger {
         ar.io("port", port);
         ar.io("level", level);
         ar.io("updated", updated);
+    }
+};
+
+// A recent attack by the player on an independent ship (repeated hits count once).
+struct Offense {
+    EntityId victim;
+    SimTime time;
+
+    template <typename Archive>
+    void io(Archive& ar) {
+        ar.io("victim", victim);
+        ar.io("time", time);
     }
 };
 
@@ -238,6 +276,10 @@ public:
     [[nodiscard]] const std::vector<f64>& initialStock() const { return m_initialStock; }
     // The port whose market the ship is docked at (keeping station there), or invalid.
     [[nodiscard]] EntityId dockedPort(const World& world, EntityId ship) const;
+    // Standing of the player with the Authority and the traders (-100..100), and the Authority's purse.
+    [[nodiscard]] f64 reputation() const { return m_reputation; }
+    [[nodiscard]] bool hostile() const;
+    [[nodiscard]] i64 treasury() const { return m_treasury; }
     [[nodiscard]] const SandboxConfig& config() const { return m_config; }
     [[nodiscard]] bool tactical() const;
 
@@ -253,6 +295,12 @@ private:
     void addInflight(EntityId port, GoodId good, f64 tonnes);
     void addDanger(EntityId port, SimTime now);
     void onTradeCommand(const TradeCommand& command, const TickContext& context);
+    void onBoardCommand(const BoardCommand& command, const TickContext& context);
+    void updatePayroll(const TickContext& context);
+    [[nodiscard]] bool witnessedByTraders(EntityId ship) const;
+    void changeReputation(f64 delta);
+    void payBounty(World& world, const std::string& name, SimTime now);
+    void collectTax(i64 tax);
     void updateHaulers(const TickContext& context);
     void updatePirates(const TickContext& context);
     void updateUpkeep(const TickContext& context);
@@ -291,6 +339,9 @@ private:
     std::vector<JournalEntry> m_journal;
     SandboxStats m_stats;
     i64 m_playerCredits = 0; // carried over to a replacement ship
+    i64 m_treasury = 0;
+    f64 m_reputation = 0.0;
+    std::vector<Offense> m_offenses;
     PriceBook m_playerPrices;
     PriceBook m_traderPrices;
     std::vector<PortDanger> m_danger;

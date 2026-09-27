@@ -165,7 +165,8 @@ struct Wallet {
 
 struct TradeResult {
     u32 tonnes = 0;
-    i64 credits = 0; // paid (buy) or received (sell)
+    i64 credits = 0; // paid to (buy) or received from (sell) the market, before tax
+    i64 tax = 0;     // paid on top by the trader, for whoever levies it
 };
 
 // Ton by ton along the price curve, so large orders move the price against the trader. Buying stops when the
@@ -173,8 +174,11 @@ struct TradeResult {
 // market is full or the hold has no more of the good. The market must trade the good.
 [[nodiscard]] i64 buyPrice(const MarketGood& good, f64 basePrice); // next tonne
 [[nodiscard]] i64 sellPrice(const MarketGood& good, f64 basePrice);
-TradeResult buyGoods(MarketGood& good, f64 basePrice, u32 tonnes, CargoHold& hold, Wallet& wallet);
-TradeResult sellGoods(MarketGood& good, f64 basePrice, u32 tonnes, CargoHold& hold, Wallet& wallet);
+// `taxRate`: share of each tonne's price the trader pays on top (buying) or leaves behind (selling).
+TradeResult buyGoods(MarketGood& good, f64 basePrice, u32 tonnes, CargoHold& hold, Wallet& wallet,
+                     f64 taxRate = 0.0);
+TradeResult sellGoods(MarketGood& good, f64 basePrice, u32 tonnes, CargoHold& hold, Wallet& wallet,
+                      f64 taxRate = 0.0);
 // What buying `tonnes` would cost, without trading (hold and wallet limits ignored).
 [[nodiscard]] TradeResult quoteBuy(const MarketGood& good, f64 basePrice, u32 tonnes);
 

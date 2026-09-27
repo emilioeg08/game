@@ -242,3 +242,16 @@ mantenimiento y dos demandas), 1 hora simulada en ticks de 10 s:
 | 7 | 3 | 11.476 t | 712 t | 167 t | 22 | 148.010 |
 
 El balance de bienes es exacto (±0,000 t) en todas las ejecuciones.
+
+## M3.1 — Consecuencias (2026-09-27)
+
+Flujos de dinero (`gx_headless --sandbox --minutes 600`, Release, semilla 2400, 12 cargueros):
+
+| Piratas | Entregado | Tesorería final | Impuestos | Reparaciones | Salarios | Quiebras | Cargueros perdidos |
+|---|---|---|---|---|---|---|---|
+| 0 | 16.361 t | 67.526 | 47.526 | 0 | 36.000 | 0 | 0 |
+| 3 | 13.301 t | 93.996 | 44.500 | 29.496 | 35.890 | 3 | 16 |
+| 6 | 12.264 t | 81.505 | 42.561 | 18.944 | 35.800 | 1 | 38 |
+
+El coste de simulación no cambia de forma apreciable: los salarios son un sistema por minuto, y los
+impuestos y las reparaciones van dentro de operaciones que ya existían.

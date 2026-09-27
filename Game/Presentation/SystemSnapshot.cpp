@@ -83,6 +83,9 @@ void SnapshotBuilder::build(const Simulation& simulation, const Sandbox& sandbox
     out.explosions.clear();
     out.playerModules.clear();
     out.playerCredits = 0;
+    out.playerReputation = sandbox.reputation();
+    out.playerHostile = sandbox.hostile();
+    out.treasury = sandbox.treasury();
     out.playerCargoCapacity = 0;
     out.playerCargo.clear();
     out.dockedPort = {};
