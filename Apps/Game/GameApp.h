@@ -34,6 +34,7 @@ public:
         bool showTruth = false;     // debug omniscient view
         i32 flyToPort = -1;         // order the player ship to this port (index in Sandbox::ports())
         bool engageNearest = false; // after the prerun: attack the nearest contact and fight for 3 s
+        bool hideHelp = false;      // start with the controls window closed
     };
 
     GameApp();
@@ -68,6 +69,7 @@ private:
     void submitEngage(u32 track, bool fire, bool pursue);
     void submitTrade(GoodId good, i32 tonnes);
     void submitBoard(u32 track);
+    void submitContract(u32 contract, ContractAction action);
 
     void drawTimeBar();
     void drawShipPanel();
@@ -75,6 +77,7 @@ private:
     void drawContactSelection(const ContactView& contact);
     void drawCombatSection(const ShipView& ship);
     void drawMarketWindow();
+    void drawContractsWindow();
     void drawKnownPrices(EntityId port);
     void drawEconomyInspector();
     void drawSensorsPanel();
@@ -111,6 +114,7 @@ private:
 
     bool m_showHelp = true;
     bool m_showTraffic = false; // journal: NPC comings and goings
+    bool m_showContracts = true;
     bool m_showDebug = false;
     bool m_quit = false;
     std::string m_status;

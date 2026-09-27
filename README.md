@@ -3,7 +3,7 @@
 Motor propio en C++20 para un sandbox 4X de simulación galáctica persistente: la galaxia existe, cambia y
 produce consecuencias aunque el jugador no la esté mirando.
 
-**Estado: M3.2 (Patrullas de la Autoridad).** El primer vertical slice está completo. Hay un juego en
+**Estado: M3.3 (Contratos).** El primer vertical slice está completo. Hay un juego en
 tiempo real (×1, ×3, ×10):
 
 - un sistema estelar generado con órbitas keplerianas;
@@ -29,7 +29,10 @@ identifican atacándolos (con el transpondedor apagado y a distancia pueden no s
 naves sin energía para llevarte su carga.
 
 La Autoridad convierte lo que recauda en patrullas. Acuden a las llamadas de socorro de los cargueros,
-persiguen piratas y van a por ti si eres hostil. Con ellas se pierden un 41 % menos de cargueros.
+persiguen piratas y van a por ti si eres hostil. Con ellas se pierden un tercio menos de cargueros.
+
+Hay contratos que nacen de lo que pasa: suministros urgentes a puertos con escasez real (los paga el
+puerto) y recompensas por piratas identificados (las paga la Autoridad). Se aceptan en las estaciones (K).
 
 Por debajo están el kernel de M1 (entidades, eventos, comandos, save/load, replay, LOD por frecuencia) y la
 fase 0. El diseño es provisional
@@ -68,13 +71,13 @@ Presets: `debug` (sin optimizar, con asserts), `release` (optimizado, para bench
 ```
 
 Controles: rueda = zoom · arrastrar = mover · clic = seleccionar · **clic derecho = ir allí** ·
-WASD = empuje manual · X = frenar · E = atacar el contacto seleccionado · C = alto el fuego · B = abordar ·
+WASD = empuje manual · X = frenar · E = atacar el contacto seleccionado · C = alto el fuego · B = abordar · K = contratos ·
 R/T = radar/transpondedor · ventana Mercado al atracar · Espacio = pausa · 1/2/3 = ×1 (tiempo real)/×3/×10 · H/F = seguir ·
 F5/F9 = guardar/cargar · F3 = depuración · F1 = ayuda. La primera configuración descarga SDL3 y Dear ImGui
 (versiones fijadas); `-DGX_BUILD_CLIENT=OFF` compila sin el cliente.
 
 Modo captura para comprobaciones automáticas:
-`gx_game.exe --frames 60 --prerun-hours 30 --select --screenshot captura.png`. Hay un combate reproducible
+`gx_game.exe --frames 60 --prerun-hours 30 --select --screenshot captura.png` (`--no-help` cierra la ayuda). Hay un combate reproducible
 con `gx_game.exe --seed 1 --fly-to 1 --prerun-hours 0.0745 --engage-nearest --zoom 1100 --frames 20
 --screenshot combate.png`.
 
@@ -125,5 +128,5 @@ cmake/ scripts/ tools/
   combate, economía, NPC, controles).
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md): capas, tiempo, pipeline, presentación, threading,
   entidades, eventos, comandos, persistencia, determinismo, LOD, referencias, contradicciones y riesgos.
-- [docs/DECISIONS.md](docs/DECISIONS.md): registro de decisiones (ADR-001 a ADR-030).
+- [docs/DECISIONS.md](docs/DECISIONS.md): registro de decisiones (ADR-001 a ADR-031).
 - [docs/BENCHMARKS.md](docs/BENCHMARKS.md): método y resultados medidos por hito.

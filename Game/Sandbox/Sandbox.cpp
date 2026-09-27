@@ -140,6 +140,10 @@ void Sandbox::install(Simulation& simulation) {
                                             [this](const EngageCommand& command, const TickContext& context) {
                                                 onEngageCommand(command, context);
                                             });
+    commands.registerCommand<ContractCommand>(
+        "Game.Contract", [this](const ContractCommand& command, const TickContext& context) {
+            onContractCommand(command, context);
+        });
     commands.registerCommand<BoardCommand>("Game.Board",
                                            [this](const BoardCommand& command, const TickContext& context) {
                                                onBoardCommand(command, context);
@@ -166,6 +170,11 @@ void Sandbox::install(Simulation& simulation) {
                           SimDuration::seconds(1),
                           {},
                           [this](const TickContext& context) { updatePatrols(context); }});
+    simulation.addSystem({"Game.Contracts",
+                          TickPhase::Simulation,
+                          SimDuration::seconds(30),
+                          {},
+                          [this](const TickContext& context) { updateContracts(context); }});
     simulation.addSystem({"Game.Payroll",
                           TickPhase::Simulation,
                           SimDuration::minutes(1),
@@ -1131,6 +1140,7 @@ void Sandbox::onShipDestroyed(const ShipDestroyed& event, const TickContext& con
             ++m_stats.patrolsLost;
         } else if (identity->faction == content::kFactionPirates) {
             ++m_stats.piratesLost;
+            settleBounty(event.ship, event.attacker.isValid() && event.attacker == m_player, now);
             const ShipIdentity* killer = world.isAlive(event.attacker)
                                              ? world.components<ShipIdentity>().tryGet(event.attacker)
                                              : nullptr;
@@ -1389,6 +1399,7 @@ void Sandbox::onBoardCommand(const BoardCommand& command, const TickContext& con
     } else if (victimIdentity.faction == content::kFactionPirates) {
         changeReputation(content::kReputationPirateKill);
         payBounty(world, victimIdentity.name, context.now);
+        settleBounty(victim, true, context.now); // captured counts as taken
         m_nextPirateSpawn = std::max(m_nextPirateSpawn, context.now + m_config.pirateRespawnDelay);
     }
     world.destroyEntity(victim); // Commands phase: structural changes are allowed here
@@ -1742,6 +1753,8 @@ void Sandbox::writeState(BinaryWriter& writer) const {
     writer.io(m_reputation);
     writer.io(m_offenses);
     writer.io(m_distress);
+    writer.io(m_contracts);
+    writer.io(m_nextContractId);
     writer.io(m_playerPrices);
     writer.io(m_traderPrices);
     writer.io(m_danger);
@@ -1763,6 +1776,8 @@ void Sandbox::readState(BinaryReader& reader) {
     reader.io(m_reputation);
     reader.io(m_offenses);
     reader.io(m_distress);
+    reader.io(m_contracts);
+    reader.io(m_nextContractId);
     reader.io(m_playerPrices);
     reader.io(m_traderPrices);
     reader.io(m_danger);

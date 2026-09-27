@@ -804,19 +804,205 @@ GX_TEST(Sandbox, PatrolsHuntAHostilePlayer) {
     GX_EXPECT(session.journalContains("saldada"));
 }
 
-GX_TEST(Sandbox, PatrolsAnsweringDistressCallsSaveTraders) {
-    // Causality: the treasury's patrols answer the traders' calls for help, and fewer traders die.
-    const auto lost = [](u32 patrols) {
-        SandboxConfig config;
-        config.maxPatrols = patrols;
-        Session session(3, config);
-        session.sandbox.populate(session.simulation);
-        session.simulation.runFor(SimDuration::hours(8));
-        GX_EXPECT(session.sandbox.stats().distressCalls > 0);
-        GX_EXPECT(patrols == 0 || session.sandbox.stats().distressAnswered > 0);
-        return session.sandbox.stats().haulersLost;
-    };
-    const u64 unprotected = lost(0);
-    const u64 protectedByPatrols = lost(3);
-    GX_EXPECT(protectedByPatrols < unprotected);
+GX_TEST(Sandbox, ADistressCallBringsAPatrolAndTheRaiderBreaksOff) {
+    // The mechanism behind fewer losses (measured over several seeds in docs/BENCHMARKS.md): a trader under
+    // fire calls for help, the nearest free patrol jumps there, and the raider gives up the hunt.
+    SandboxConfig config;
+    config.haulers = 1;
+    config.pirates = 1;
+    config.maxPatrols = 1;
+    Session session(0, config);
+    session.sandbox.populate(session.simulation);
+    World& world = session.simulation.world();
+    session.simulation.runFor(SimDuration::minutes(3));
+    GX_REQUIRE(world.components<PatrolBrain>().size() == 1u);
+    const EntityId patrol = world.components<PatrolBrain>().entities()[0];
+    const EntityId pirate = world.components<PirateBrain>().entities()[0];
+    const EntityId hauler = world.components<HaulerBrain>().entities()[0];
+    const Vec3d spot{0.0, 0.0, 5e10};
+    world.components<Kinematics>().get(hauler) = {spot, {}, {}};
+    world.components<ShipControl>().get(hauler) = {};
+    world.components<HaulerBrain>().get(hauler).departAt = session.simulation.now() + SimDuration::hours(5);
+    world.components<Kinematics>().get(pirate) = {spot + Vec3d{100'000.0, 0.0, 0.0}, {}, {}};
+    world.components<ShipControl>().get(pirate).point = spot + Vec3d{100'000.0, 0.0, 0.0};
+    // Far beyond sensor range of the fight: only the call can bring it.
+    world.components<Kinematics>().get(patrol) = {spot + Vec3d{0.0, 1.5e9, 0.0}, {}, {}};
+    world.components<ShipControl>().get(patrol) = {};
+    world.components<PatrolBrain>().get(patrol).nextMove = session.simulation.now() + SimDuration::hours(1);
+
+    bool hunted = false;
+    for (int second = 0; second < 90; ++second) {
+        session.simulation.runFor(SimDuration::seconds(1));
+        hunted = hunted || world.components<PirateBrain>().get(pirate).state == PirateState::Hunting;
+        if (hunted && world.components<PirateBrain>().get(pirate).state != PirateState::Hunting) {
+            break;
+        }
+    }
+    GX_EXPECT(hunted);
+    GX_EXPECT(session.sandbox.stats().distressCalls >= 1);
+    GX_EXPECT(session.sandbox.stats().distressAnswered >= 1);
+    GX_EXPECT(world.components<PirateBrain>().get(pirate).state != PirateState::Hunting); // it broke off
+    GX_EXPECT(world.isAlive(hauler));
+    GX_EXPECT(length(world.components<Kinematics>().get(patrol).position - spot) < content::kPirateWaryRange);
+}
+
+namespace {
+
+const Contract* findContract(const Session& session, ContractKind kind, EntityId subject) {
+    for (const Contract& contract : session.sandbox.contracts()) {
+        if (contract.kind == kind && contract.live() &&
+            (kind == ContractKind::Delivery ? contract.port == subject : contract.target == subject)) {
+            return &contract;
+        }
+    }
+    return nullptr;
+}
+
+} // namespace
+
+GX_TEST(Sandbox, ShortagesPostDeliveryContractsPaidByThePort) {
+    SandboxConfig config;
+    config.pirates = 0;
+    config.maxPatrols = 0;
+    Session session(0, config);
+    session.sandbox.populate(session.simulation);
+    World& world = session.simulation.world();
+    const EntityId player = session.sandbox.playerShip();
+    const EntityId home = session.sandbox.homePort();
+    MarketGood* water = world.components<Market>().get(home).find(content::kGoodWater);
+    GX_REQUIRE(water != nullptr);
+    water->stock = 0.0; // a real shortage at the player's own station
+    const i64 treasury = session.sandbox.treasury();
+    session.simulation.runFor(SimDuration::seconds(31)); // the board is updated every 30 s
+    const Contract* contract = findContract(session, ContractKind::Delivery, home);
+    GX_REQUIRE(contract != nullptr);
+    GX_EXPECT_EQ(contract->good, static_cast<GoodId>(content::kGoodWater));
+    const i64 reward = contract->reward;
+    GX_EXPECT_EQ(reward, std::llround(content::kContractTonnes * 20.0 * content::kContractPremium));
+    GX_EXPECT_EQ(session.sandbox.treasury(), treasury); // the port pays, not the Authority
+    GX_EXPECT(session.journalContains("escasez de Agua"));
+
+    // Docked at the station: accept, bring the water, deliver.
+    const u32 id = contract->id;
+    session.simulation.submitCommand(ContractCommand{player, id, ContractAction::Accept});
+    world.components<CargoHold>().get(player).add(content::kGoodWater, content::kContractTonnes);
+    const f64 stockBefore = world.components<Market>().get(home).find(content::kGoodWater)->stock;
+    session.simulation.runFor(SimDuration::milliseconds(10));
+    session.simulation.submitCommand(ContractCommand{player, id, ContractAction::Deliver});
+    session.simulation.runFor(SimDuration::milliseconds(10));
+    GX_EXPECT_EQ(world.components<Wallet>().get(player).credits, content::kPlayerStartCredits + reward);
+    GX_EXPECT_EQ(world.components<CargoHold>().get(player).amount(content::kGoodWater), 0u);
+    GX_EXPECT_NEAR(world.components<Market>().get(home).find(content::kGoodWater)->stock - stockBefore,
+                   static_cast<f64>(content::kContractTonnes), 1e-6);
+    GX_EXPECT_NEAR(session.sandbox.reputation(), content::kReputationContractDone, 0.1);
+    GX_EXPECT_EQ(session.sandbox.stats().contractsCompleted, 1u);
+    GX_EXPECT(session.journalContains("Contrato cumplido"));
+}
+
+GX_TEST(Sandbox, ContractEscrowNeverLeaksMoney) {
+    // No trade, no patrols: the treasury and the escrow of live bounties always add up to the start (the
+    // bounties are posted on raiders the traders report, and expire unclaimed).
+    SandboxConfig config;
+    config.haulers = 2;
+    config.pirates = 2;
+    config.maxPatrols = 0;
+    Session session(0, config);
+    session.sandbox.populate(session.simulation);
+    for (int hour = 0; hour < 6; ++hour) {
+        session.simulation.runFor(
+            SimDuration::hours(1)); // markets run dry (4 h of stock): shortages, contracts
+        i64 escrow = 0;
+        for (const Contract& contract : session.sandbox.contracts()) {
+            escrow += contract.live() && contract.escrowed ? contract.reward : 0;
+        }
+        // Taxes and repairs come in too: count them, and nothing else may have moved money.
+        const SandboxStats& stats = session.sandbox.stats();
+        GX_EXPECT_EQ(session.sandbox.treasury() + escrow, content::kStartingTreasury + stats.taxesCollected +
+                                                              stats.repairFees - stats.bountiesPaid);
+    }
+    GX_EXPECT(session.sandbox.stats().contractsPosted > 0);
+    GX_EXPECT(session.sandbox.stats().contractsExpired + session.sandbox.stats().contractsCancelled > 0);
+}
+
+GX_TEST(Sandbox, AcceptingNeedsAStationAndFailingCostsReputation) {
+    SandboxConfig config;
+    config.pirates = 0;
+    config.maxPatrols = 0;
+    Session session(0, config);
+    session.sandbox.populate(session.simulation);
+    World& world = session.simulation.world();
+    const EntityId player = session.sandbox.playerShip();
+    world.components<Market>().get(session.sandbox.homePort()).find(content::kGoodWater)->stock = 0.0;
+    session.simulation.runFor(SimDuration::seconds(31));
+    const Contract* contract = findContract(session, ContractKind::Delivery, session.sandbox.homePort());
+    GX_REQUIRE(contract != nullptr);
+    const u32 id = contract->id;
+
+    session.pilot(FlightMode::Stop); // undocked: the board is at the stations
+    session.simulation.runFor(SimDuration::seconds(1));
+    session.simulation.submitCommand(ContractCommand{player, id, ContractAction::Accept});
+    session.simulation.runFor(SimDuration::milliseconds(10));
+    GX_EXPECT(session.journalContains("tablón de una estación"));
+    session.pilot(FlightMode::Approach, session.sandbox.homePort());
+    for (int i = 0; i < 60 && !session.playerControl().arrived; ++i) {
+        session.simulation.runFor(SimDuration::seconds(1));
+    }
+    session.simulation.submitCommand(ContractCommand{player, id, ContractAction::Accept});
+    session.simulation.runFor(SimDuration::milliseconds(10));
+    const i64 treasury = session.sandbox.treasury();
+    session.simulation.submitCommand(ContractCommand{player, id, ContractAction::Abandon});
+    session.simulation.runFor(SimDuration::milliseconds(10));
+    GX_EXPECT_EQ(session.sandbox.stats().contractsFailed, 1u);
+    GX_EXPECT_NEAR(session.sandbox.reputation(), content::kReputationContractFailed, 0.1);
+    GX_EXPECT_EQ(session.sandbox.treasury(), treasury); // deliveries are the port's: no escrow to return
+}
+
+GX_TEST(Sandbox, BountyContractsPayForTheNamedPirate) {
+    SandboxConfig config;
+    config.haulers = 1;
+    config.pirates = 1;
+    config.maxPatrols = 0;
+    Session session(0, config);
+    session.sandbox.populate(session.simulation);
+    World& world = session.simulation.world();
+    const EntityId player = session.sandbox.playerShip();
+    const EntityId pirate = world.components<PirateBrain>().entities()[0];
+    const EntityId hauler = world.components<HaulerBrain>().entities()[0];
+    // A trader spots the raider (it is identified at 100 km) and reports it: the Authority posts a bounty.
+    const Vec3d spot{0.0, 0.0, 5e10};
+    world.components<Kinematics>().get(hauler) = {spot, {}, {}};
+    world.components<ShipControl>().get(hauler) = {};
+    world.components<HaulerBrain>().get(hauler).departAt = session.simulation.now() + SimDuration::hours(5);
+    world.components<Kinematics>().get(pirate) = {spot + Vec3d{100'000.0, 0.0, 0.0}, {}, {}};
+    world.components<ShipControl>().get(pirate).point = spot + Vec3d{100'000.0, 0.0, 0.0};
+    session.simulation.runFor(SimDuration::seconds(31));
+    const Contract* contract = findContract(session, ContractKind::Bounty, pirate);
+    GX_REQUIRE(contract != nullptr);
+    GX_EXPECT(contract->targetName == world.components<ShipIdentity>().get(pirate).name);
+    const u32 id = contract->id;
+    session.simulation.submitCommand(ContractCommand{player, id, ContractAction::Accept}); // docked at home
+    session.simulation.runFor(SimDuration::milliseconds(10));
+
+    // Go and get it (moved next to it for the test), with the raider nearly wrecked.
+    session.pilot(FlightMode::Stop);
+    session.simulation.runFor(SimDuration::milliseconds(10));
+    const Vec3d raider = world.components<Kinematics>().get(pirate).position;
+    world.components<Kinematics>().get(player) = {raider + Vec3d{0.0, 150'000.0, 0.0}, {}, {}};
+    // Crippled so that it cannot run (a beaten raider flees at once): structure, drive and hyperdrive.
+    for (ShipModule& module : world.components<ShipModules>().get(pirate).modules) {
+        module.health = module.type == ModuleType::Structure ? 5.0
+                        : module.type == ModuleType::Drive || module.type == ModuleType::HyperDrive
+                            ? 0.0
+                            : module.health;
+    }
+    applyModuleEffects(world, pirate);
+    session.simulation.runFor(SimDuration::seconds(2));
+    const u32 track = trackOf(session, pirate);
+    GX_REQUIRE(track != 0);
+    session.simulation.submitCommand(EngageCommand{player, track, true, false});
+    session.simulation.runFor(SimDuration::seconds(20));
+    GX_EXPECT(!world.isAlive(pirate));
+    GX_EXPECT_EQ(session.sandbox.stats().contractsCompleted, 1u);
+    GX_EXPECT(world.components<Wallet>().get(player).credits >=
+              content::kPlayerStartCredits + content::kContractBountyReward + content::kPirateBounty);
 }

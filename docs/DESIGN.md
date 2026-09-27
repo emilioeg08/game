@@ -6,7 +6,7 @@
 > (`Game/Sandbox/Content.h`) o en parámetros de generación, no dispersos por los sistemas, para que moverlos
 > a ficheros de datos (modding) sea un cambio local.
 
-## Estado: slice M3.2 "Patrullas de la Autoridad"
+## Estado: slice M3.3 "Contratos"
 
 Se puede:
 
@@ -22,7 +22,9 @@ Se puede:
   salarios y quiebras de los comerciantes, recompensas por piratas, reputación según lo que los
   comerciantes han visto, y abordaje de naves sin energía;
 - ver cómo la Autoridad **patrulla** con lo que recauda (M3.2): acude a las llamadas de socorro, persigue
-  piratas y va a por ti si eres hostil.
+  piratas y va a por ti si eres hostil;
+- aceptar **contratos** (M3.3) que nacen de la situación real: suministros a puertos con escasez y
+  recompensas por piratas identificados.
 
 Con esto el primer vertical slice del prompt (§5) está completo.
 
@@ -338,6 +340,30 @@ y va a la vista: radar y transpondedor siempre encendidos.
 - Sin las llamadas de socorro, las patrullas no servían: llegaban tarde a donde ya no había piratas
   (ADR-030).
 
+## Contratos (ADR-031)
+
+Todo contrato sale del estado real de la simulación; no hay misiones inventadas.
+
+| Tipo | Cuándo se publica | Qué pide | Quién paga | Plazo |
+|---|---|---|---|---|
+| Suministro | un puerto tiene menos del 25 % de su objetivo de un bien que consume | 20 t de ese bien entregadas allí | el propio puerto: 20 t × precio base × 2 (800 cr de agua, 1.600 de alimentos...) | 45 min |
+| Recompensa | la Autoridad o la red de comerciantes tienen identificado a un pirata | abatirlo o capturarlo | la tesorería: 2.500 cr, además de la recompensa normal | 60 min |
+
+- **Tablón:** hay como máximo 6 contratos publicados y un suministro por puerto a la vez. Se ven y se
+  aceptan atracado en una **estación**, hasta 3 a la vez, y no se dan a quien es hostil. La ventana
+  Contratos (K) muestra los tuyos en todo momento, con lo entregado y el tiempo restante.
+- **Entrega:** atracado en el puerto de destino. La mercancía entra en sus existencias (alivia la escasez
+  de verdad), puede ser parcial, y al completarla cobras y ganas +3 de reputación.
+- **Fallar o abandonar:** −5 de reputación. Si el pirata muere a manos de otro o se va, el contrato se
+  cancela sin penalización.
+- **La Autoridad prioriza sus patrullas.** Solo reserva una recompensa (la retira de la tesorería hasta
+  que se cobra o caduca) si le sobra dinero después de la próxima compra de patrullero, 4 h de
+  mantenimiento de la flota y 5.000 cr de margen.
+
+**Medido** (8 h, 4 semillas, 3 piratas, hasta 3 patrullas): se publican entre 18 y 43 contratos. Con
+patrullas se pierden 31 cargueros frente a 46 sin ellas (−33 %). Cuando las recompensas salían de la
+misma tesorería sin prioridad, había semillas con solo 2 patrullas y el efecto bajaba al −26 %.
+
 ## Facciones y personajes (mínimo)
 
 - **Jugador** (verde), **Transportistas independientes** (azul) y **Piratas** (rojo). La política, las
@@ -388,6 +414,7 @@ y va a la vista: radar y transpondedor siempre encendidos.
 | Interceptar sin disparar | botón en la selección del contacto |
 | Comprar / vender | ventana Mercado, atracado en un puerto (+1, +10, −1, Todo) |
 | Abordar el contacto seleccionado (sin energía, a < 5 km, velocidad igualada) | B |
+| Contratos | K (se aceptan atracado en una estación) |
 | Pausa / velocidad | Espacio / 1 (×1), 2 (×3), 3 (×10) |
 | Seguir tu nave / la selección | H / F |
 | Guardar / cargar | F5 / F9 |

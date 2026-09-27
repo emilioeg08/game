@@ -233,6 +233,21 @@ inline constexpr f64 kReputationAttackAuthority = -15.0; // identified attacking
 inline constexpr f64 kReputationKillAuthority = -40.0;
 inline constexpr f64 kReputationAfterDeath = -20.0; // a destroyed hostile player has paid: no longer wanted
 
+// --- Contracts (ADR-031)
+// ------------------------------------------------------------------------------------
+inline constexpr f64 kContractShortageRatio = 0.25; // stock / target below which a port asks for supplies
+inline constexpr u32 kContractTonnes = 20;          // what a courier can carry
+inline constexpr f64 kContractPremium = 2.0;        // reward: tonnes x base price x premium
+inline constexpr SimDuration kContractDeliveryTime = SimDuration::minutes(45);
+inline constexpr i64 kContractBountyReward = 2'500; // on top of the standard bounty
+inline constexpr SimDuration kContractBountyTime = SimDuration::minutes(60);
+inline constexpr SimDuration kContractHistory = SimDuration::minutes(30); // closed contracts stay listed
+inline constexpr usize kMaxOpenContracts = 6;
+inline constexpr usize kMaxAcceptedContracts = 3;
+inline constexpr i64 kContractTreasuryReserve = 5'000; // plus the patrol budget: patrols come first
+inline constexpr f64 kReputationContractDone = 3.0;
+inline constexpr f64 kReputationContractFailed = -5.0;
+
 enum class PortRole : u8 { Planet, Refinery, Factory, Industry };
 
 // Economic profile of a port. Targets and capacities are filled in by the caller from the rates.

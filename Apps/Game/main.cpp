@@ -45,6 +45,8 @@ int main(int argc, char** argv) {
             ok = parseNumber(value(), options.flyToPort);
         } else if (arg == "--truth") {
             options.showTruth = true;
+        } else if (arg == "--no-help") {
+            options.hideHelp = true;
         } else if (arg == "--engage-nearest") {
             options.engageNearest = true;
         } else if (arg == "--select-port") {

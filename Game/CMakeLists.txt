@@ -4,8 +4,10 @@ add_library(gx_gameplay STATIC
     Presentation/SystemSnapshot.cpp
     Presentation/SystemSnapshot.h
     Sandbox/Content.h
+    Sandbox/Contracts.h
     Sandbox/Sandbox.cpp
     Sandbox/Sandbox.h
+    Sandbox/SandboxContracts.cpp
 )
 
 target_link_libraries(gx_gameplay PUBLIC gx_space)

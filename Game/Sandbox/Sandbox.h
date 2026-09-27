@@ -4,6 +4,7 @@
 #include "Engine/Core/Types.h"
 #include "Engine/Math/Vec3.h"
 #include "Engine/Time/SimTime.h"
+#include "Game/Sandbox/Contracts.h"
 #include "Simulation/Economy/Economy.h"
 #include "Simulation/Kernel/SystemScheduler.h"
 #include "Simulation/World/EntityRegistry.h"
@@ -227,6 +228,12 @@ struct SandboxStats {
     u64 wantedChases = 0; // patrols going after a hostile player
     u64 distressCalls = 0;
     u64 distressAnswered = 0;
+    u64 contractsPosted = 0;
+    u64 contractsCompleted = 0;
+    u64 contractsFailed = 0;
+    u64 contractsExpired = 0;
+    u64 contractsCancelled = 0;
+    i64 contractRewardsPaid = 0;
 
     template <typename Archive>
     void io(Archive& ar) {
@@ -259,6 +266,12 @@ struct SandboxStats {
         ar.io("wantedChases", wantedChases);
         ar.io("distressCalls", distressCalls);
         ar.io("distressAnswered", distressAnswered);
+        ar.io("contractsPosted", contractsPosted);
+        ar.io("contractsCompleted", contractsCompleted);
+        ar.io("contractsFailed", contractsFailed);
+        ar.io("contractsExpired", contractsExpired);
+        ar.io("contractsCancelled", contractsCancelled);
+        ar.io("contractRewardsPaid", contractRewardsPaid);
     }
 };
 
@@ -337,6 +350,10 @@ public:
     [[nodiscard]] f64 reputation() const { return m_reputation; }
     [[nodiscard]] bool hostile() const;
     [[nodiscard]] i64 treasury() const { return m_treasury; }
+    // Open, accepted and recently closed contracts (ADR-031).
+    [[nodiscard]] const std::vector<Contract>& contracts() const { return m_contracts; }
+    // One line for the UI and the journal: "20 t de Agua a Arenmir II", "abatir al pirata ...".
+    [[nodiscard]] std::string describe(const Contract& contract) const;
     [[nodiscard]] const SandboxConfig& config() const { return m_config; }
     [[nodiscard]] bool tactical() const;
 
@@ -353,6 +370,11 @@ private:
     void addDanger(EntityId port, SimTime now);
     void onTradeCommand(const TradeCommand& command, const TickContext& context);
     void onBoardCommand(const BoardCommand& command, const TickContext& context);
+    void onContractCommand(const ContractCommand& command, const TickContext& context);
+    void updateContracts(const TickContext& context);
+    void closeContract(Contract& contract, ContractState state, SimTime now);
+    // A wanted pirate was destroyed or captured: completes (by the player, accepted) or cancels its bounties.
+    void settleBounty(EntityId pirate, bool byPlayer, SimTime now);
     void updatePayroll(const TickContext& context);
     // Whether `faction`'s sensor picture has `ship` identified (a witness that can name it).
     [[nodiscard]] bool witnessedBy(u32 faction, EntityId ship) const;
@@ -404,6 +426,8 @@ private:
     f64 m_reputation = 0.0;
     std::vector<Offense> m_offenses;
     std::vector<DistressCall> m_distress;
+    std::vector<Contract> m_contracts;
+    u32 m_nextContractId = 1;
     PriceBook m_playerPrices;
     PriceBook m_traderPrices;
     std::vector<PortDanger> m_danger;

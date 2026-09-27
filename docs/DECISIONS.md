@@ -408,3 +408,34 @@ sustituya y explique por qué.
   16 frente a 8 pérdidas).
 - **Consecuencias:** el diario distingue jugador, noticias y tráfico (`JournalKind`). El tráfico se borra
   primero al llenarse y el cliente lo oculta por defecto.
+
+## ADR-031 — Contratos nacidos del estado real; suministros pagados por el puerto y recompensas con reserva
+
+- **Contexto:** el jugador necesita objetivos. El prompt pide misiones (fase 4) y causalidad (§30): una
+  misión debe responder a algo que pasa de verdad y tener efectos de verdad.
+- **Decisión:**
+  - `Contract` (en `Game/Sandbox/Contracts.h`) tiene dos tipos: suministro y recompensa. `Game.Contracts`
+    (cada 30 s) gestiona plazos y cancelaciones y publica contratos nuevos.
+    - Suministro: cuando un puerto baja del 25 % de su objetivo en un bien que consume.
+    - Recompensa: cuando la imagen de la Autoridad o la de los comerciantes tiene identificado a un pirata.
+  - Una entrega mete la mercancía en las existencias del puerto (alivia la escasez de verdad).
+  - Un pirata abatido o capturado por el jugador cierra su contrato; si lo abate otro o se va, se cancela.
+  - Los suministros los paga el puerto (como sus compras). Las recompensas salen de la tesorería con
+    reserva (`escrowed`) y solo del dinero que las patrullas no necesitan.
+- **Mediciones que cambiaron el diseño:**
+  1. Con todo pagado desde la tesorería, los contratos competían con las patrullas: había semillas con 2
+     patrullas y el efecto sobre las pérdidas bajaba del −41 % al −26 %.
+  2. Al dar prioridad a las patrullas, casi no quedaban contratos (1–27 en 8 h).
+  3. Separar quién paga resolvió ambas cosas: 18–43 contratos en 8 h y −33 % de pérdidas con patrullas.
+- **Método:** la prueba causal de patrullas sobre una sola trayectoria dejó de cumplirse al cambiar
+  cualquier otra cosa, porque la variabilidad entre trayectorias es de ±20 %.
+  - Las pruebas verifican ahora **mecanismos** de forma determinista. Por ejemplo: una llamada de socorro
+    atrae a la patrulla desde 1,5 millones de km y el pirata rompe la caza.
+  - Los **efectos agregados** se miden en varias semillas y se documentan en `docs/BENCHMARKS.md`.
+  - La prueba de piratas y suministro sigue siendo agregada: su margen es amplio y estable a 8 h.
+- **Verificado:**
+  - suministro pagado por el puerto: mercancía en existencias, reputación +3;
+  - aceptar solo en estaciones;
+  - abandonar cuesta reputación;
+  - recompensa nombrada: 2.500 + 1.500 cr;
+  - la tesorería más lo reservado cuadra siempre con impuestos + reparaciones − recompensas.

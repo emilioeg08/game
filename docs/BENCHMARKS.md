@@ -279,3 +279,18 @@ Es una advertencia de método: una sola ejecución no separa efectos de ±20 %.
 
 Coste: las patrullas añaden una facción observadora con 3 naves a los sensores. `Game.Patrols` y
 `Game.Authority` no aparecen entre las zonas relevantes.
+
+## M3.3 — Contratos (2026-09-27)
+
+`gx_headless --sandbox --minutes 480`, Release, 12 cargueros y 3 piratas:
+
+| Semilla | Perdidos sin patrullas | Perdidos con patrullas | Patrullas compradas | Contratos publicados (con patrullas) |
+|---|---|---|---|---|
+| 2400 | 16 | 8 | 2 | 43 |
+| 7 | 11 | 6 | 3 | 43 |
+| 99 | 9 | 7 | 3 | 43 |
+| 12345 | 10 | 10 | 3 | 18 |
+| **Total** | **46** | **31 (−33 %)** | | |
+
+Sin patrullas se publican 41–51 contratos en 8 h. La mayoría son suministros, porque en headless nadie los
+acepta y caducan.

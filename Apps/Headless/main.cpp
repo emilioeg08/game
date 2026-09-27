@@ -361,6 +361,16 @@ void printEconomy(const Simulation& simulation, const Sandbox& sandbox, bool per
         static_cast<unsigned long long>(stats.distressCalls),
         static_cast<unsigned long long>(stats.distressAnswered),
         static_cast<long long>(stats.patrolUpkeepPaid));
+    std::printf(
+        "contracts: %llu posted | %llu completed, %llu failed, %llu expired, %llu cancelled | %zu on the "
+        "board\n",
+        static_cast<unsigned long long>(stats.contractsPosted),
+        static_cast<unsigned long long>(stats.contractsCompleted),
+        static_cast<unsigned long long>(stats.contractsFailed),
+        static_cast<unsigned long long>(stats.contractsExpired),
+        static_cast<unsigned long long>(stats.contractsCancelled),
+        static_cast<usize>(std::count_if(sandbox.contracts().begin(), sandbox.contracts().end(),
+                                         [](const Contract& c) { return c.state == ContractState::Open; })));
     if (!perPort) {
         return;
     }

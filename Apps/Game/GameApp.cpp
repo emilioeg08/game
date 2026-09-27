@@ -176,6 +176,7 @@ int GameApp::run(const Options& options) {
         m_selected = sandbox().ports()[static_cast<usize>(options.selectPort)];
     }
     m_showTruth = options.showTruth;
+    m_showHelp = !options.hideHelp;
 
     u32 frame = 0;
     u64 lastNs = platform::monotonicNanoseconds();
@@ -236,6 +237,9 @@ int GameApp::run(const Options& options) {
         drawSelectionPanel();
         drawSensorsPanel();
         drawMarketWindow();
+        if (m_showContracts) {
+            drawContractsWindow();
+        }
         drawJournal();
         if (m_showDebug) {
             drawDebugPanel();
@@ -390,6 +394,10 @@ void GameApp::submitBoard(u32 track) {
     simulation().submitCommand(BoardCommand{sandbox().playerShip(), track});
 }
 
+void GameApp::submitContract(u32 contract, ContractAction action) {
+    simulation().submitCommand(ContractCommand{sandbox().playerShip(), contract, action});
+}
+
 void GameApp::handleKeyboard() {
     const ImGuiIO& io = ImGui::GetIO();
     if (io.WantCaptureKeyboard) {
@@ -434,6 +442,9 @@ void GameApp::handleKeyboard() {
     }
     if (ImGui::IsKeyPressed(ImGuiKey_E, false) && m_selectedContact != 0) {
         submitEngage(m_selectedContact, true, true);
+    }
+    if (ImGui::IsKeyPressed(ImGuiKey_K, false)) {
+        m_showContracts = !m_showContracts;
     }
     if (ImGui::IsKeyPressed(ImGuiKey_B, false) && m_selectedContact != 0) {
         submitBoard(m_selectedContact);
@@ -767,6 +778,82 @@ void GameApp::drawMarketWindow() {
             ImGui::PopID();
         }
         ImGui::EndTable();
+    }
+    ImGui::End();
+}
+
+void GameApp::drawContractsWindow() {
+    const ImVec2 display = ImGui::GetIO().DisplaySize;
+    ImGui::SetNextWindowPos({display.x - 740.0f, 90.0f}, ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize({360.0f, 300.0f}, ImGuiCond_FirstUseEver);
+    ImGui::Begin("Contratos (K)", &m_showContracts);
+    const SimTime now = simulation().now();
+    const auto remaining = [&](const Contract& contract) {
+        return formatDuration(std::max(SimDuration{}, contract.deadline - now));
+    };
+    const std::vector<Contract>& contracts = sandbox().contracts();
+    const CelestialBody* docked =
+        simulation().world().components<CelestialBody>().tryGet(m_snapshot.dockedPort);
+    const bool atStation = docked != nullptr && docked->kind == BodyKind::Station;
+
+    ImGui::TextDisabled("Tus contratos");
+    bool any = false;
+    for (const Contract& contract : contracts) {
+        if (contract.state != ContractState::Accepted) {
+            continue;
+        }
+        any = true;
+        ImGui::PushID(static_cast<int>(contract.id));
+        ImGui::TextWrapped("%s", sandbox().describe(contract).c_str());
+        ImGui::TextDisabled("%lld cr  ·  quedan %s", static_cast<long long>(contract.reward),
+                            remaining(contract).c_str());
+        if (contract.kind == ContractKind::Delivery) {
+            u32 held = 0;
+            for (const CargoItem& item : m_snapshot.playerCargo) {
+                held = item.good == contract.good ? item.tonnes : held;
+            }
+            ImGui::SameLine();
+            ImGui::TextDisabled("·  entregado %u / %u t  ·  en bodega %u t", contract.delivered,
+                                contract.tonnes, held);
+            if (m_snapshot.dockedPort == contract.port && held > 0 && ImGui::SmallButton("Entregar")) {
+                submitContract(contract.id, ContractAction::Deliver);
+            }
+            ImGui::SameLine();
+        }
+        if (ImGui::SmallButton("Abandonar")) {
+            submitContract(contract.id, ContractAction::Abandon);
+        }
+        ImGui::Separator();
+        ImGui::PopID();
+    }
+    if (!any) {
+        ImGui::TextDisabled("Ninguno.");
+    }
+
+    ImGui::Spacing();
+    const usize open =
+        static_cast<usize>(std::count_if(contracts.begin(), contracts.end(),
+                                         [](const Contract& c) { return c.state == ContractState::Open; }));
+    ImGui::TextDisabled("Tablón de contratos (%zu publicados)", open);
+    if (m_snapshot.playerHostile) {
+        ImGui::TextColored(color(255, 100, 90), "La Autoridad no da contratos a quien considera hostil.");
+    } else if (!atStation) {
+        ImGui::TextDisabled("Atraca en una estación para verlos y aceptarlos.");
+    } else {
+        for (const Contract& contract : contracts) {
+            if (contract.state != ContractState::Open) {
+                continue;
+            }
+            ImGui::PushID(static_cast<int>(contract.id));
+            ImGui::TextWrapped("%s", sandbox().describe(contract).c_str());
+            ImGui::TextDisabled("%lld cr  ·  quedan %s", static_cast<long long>(contract.reward),
+                                remaining(contract).c_str());
+            ImGui::SameLine();
+            if (ImGui::SmallButton("Aceptar")) {
+                submitContract(contract.id, ContractAction::Accept);
+            }
+            ImGui::PopID();
+        }
     }
     ImGui::End();
 }
@@ -1152,6 +1239,7 @@ void GameApp::drawHelp() {
         "B: abordar");
     ImGui::BulletText(
         "Recompensa por piratas; si los comerciantes te identifican atacándolos, pierdes reputación");
+    ImGui::BulletText("K: contratos (se aceptan en las estaciones; nacen de escaseces y piratas reales)");
     ImGui::BulletText("Los piratas acechan junto a los pozos; cerca de las estaciones estás a salvo");
     ImGui::BulletText("Atracado en un puerto: compra y vende en la ventana Mercado. Las estaciones te dan el "
                       "boletín de precios de los comerciantes");
