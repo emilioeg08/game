@@ -4,6 +4,7 @@
 #include "Engine/Core/Paths.h"
 #include "Engine/Serialization/Binary.h"
 #include "Engine/Serialization/SaveFile.h"
+#include "Game/Presentation/UserSettings.h"
 
 #include <filesystem>
 #include <fstream>
@@ -263,4 +264,30 @@ GX_TEST(Serialization, SaveFilesLiveInFoldersWithAnyName) {
     GX_REQUIRE(readSaveFile(path, contents, error));
     GX_EXPECT(contents.payload == payload);
     std::filesystem::remove_all(directory, ec);
+}
+
+GX_TEST(Serialization, UserSettingsRoundTripAndTolerateOtherVersions) {
+    UserSettings settings;
+    settings.fullscreen = true;
+    settings.vsync = false;
+    settings.uiScale = 1.25f;
+    settings.showHelpOnStart = false;
+    GX_EXPECT(parseUserSettings(formatUserSettings(settings)) == settings);
+    GX_EXPECT(parseUserSettings("") == UserSettings{}); // no file: defaults
+    // Unknown keys, comments, spaces, Windows line ends, bad values and out-of-range scales.
+    const UserSettings odd = parseUserSettings("# comment\r\n future_key = 7\r\nfullscreen = true\r\n"
+                                               "vsync=maybe\r\nui_scale=9\r\nshow_help\r\n");
+    GX_EXPECT(odd.fullscreen);
+    GX_EXPECT(odd.vsync); // unchanged default
+    GX_EXPECT_NEAR(odd.uiScale, UserSettings::kMaxUiScale, 1e-6);
+    GX_EXPECT(odd.showHelpOnStart);
+    GX_EXPECT_NEAR(parseUserSettings("ui_scale=abc").uiScale, 1.0f, 1e-6);
+
+    const std::filesystem::path path = std::filesystem::temp_directory_path() / "gx_test_settings.ini";
+    std::string error;
+    GX_REQUIRE(saveUserSettings(path, settings, error));
+    GX_EXPECT(loadUserSettings(path) == settings);
+    std::error_code ec;
+    std::filesystem::remove(path, ec);
+    GX_EXPECT(loadUserSettings(path) == UserSettings{});
 }

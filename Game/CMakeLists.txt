@@ -3,6 +3,8 @@
 add_library(gx_gameplay STATIC
     Presentation/SystemSnapshot.cpp
     Presentation/SystemSnapshot.h
+    Presentation/UserSettings.cpp
+    Presentation/UserSettings.h
     Sandbox/Content.h
     Sandbox/Contracts.h
     Sandbox/Sandbox.cpp

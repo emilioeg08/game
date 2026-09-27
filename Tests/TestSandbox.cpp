@@ -191,6 +191,26 @@ GX_TEST(Sandbox, SaveLoadContinuesIdentically) {
     GX_EXPECT_EQ(loaded.simulation.stateHash(), continuous.simulation.stateHash());
 }
 
+GX_TEST(Sandbox, LoadingIntoAnotherGameContinuesTheSavedOne) {
+    // The client loads a quick save while another system is running (the main menu's, or a new game).
+    Session continuous(3);
+    continuous.sandbox.populate(continuous.simulation);
+    continuous.simulation.runFor(SimDuration::minutes(30));
+    Session saver(3);
+    saver.sandbox.populate(saver.simulation);
+    saver.simulation.runFor(SimDuration::minutes(10));
+    const std::vector<std::byte> saved = saver.simulation.saveState();
+
+    SandboxConfig other;
+    other.seed = 77;
+    Session loaded(0, other);
+    std::string error;
+    GX_REQUIRE(loaded.simulation.loadState(saved, error));
+    GX_EXPECT_EQ(loaded.sandbox.config().seed, saver.sandbox.config().seed);
+    loaded.simulation.runFor(SimDuration::minutes(20));
+    GX_EXPECT_EQ(loaded.simulation.stateHash(), continuous.simulation.stateHash());
+}
+
 GX_TEST(Sandbox, SnapshotDescribesTheWorld) {
     Session session(0);
     session.sandbox.populate(session.simulation);

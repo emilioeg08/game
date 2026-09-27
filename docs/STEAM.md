@@ -86,7 +86,7 @@ Lo técnico está resuelto: se compila, se empaqueta, arranca y se sube. Lo que 
 | Área | Estado | Qué hace falta |
 |---|---|---|
 | Nombre y marca | "GalaxyEngine" es provisional (es el nombre del motor) | nombre definitivo, comprobado en marcas registradas y en Steam; fijar la carpeta de datos antes del primer lanzamiento |
-| Menú principal y opciones | se entra directo al sandbox | menú, opciones de vídeo (ventana, pantalla completa, escala de UI) y de controles, salir con confirmación |
+| Menú principal y opciones | hecho (ADR-035): menú, pausa, vídeo, escala de UI, salir con confirmación | reasignar teclas; opciones de audio cuando haya audio |
 | Audio | no hay | música y efectos (y su volumen) |
 | Idiomas | solo español | inglés como mínimo para el mercado de Steam; los textos deben salir del código a tablas |
 | Tutorial | ventana de controles (F1) | primeros pasos guiados |

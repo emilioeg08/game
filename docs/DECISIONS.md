@@ -543,3 +543,27 @@ sustituya y explique por qué.
     socio y conviene hacerlo detrás de una capa opcional cuando haya logros.
 - **Consecuencias:** `docs/STEAM.md` recoge el alta, la subida y lo que falta de producto (menú, audio,
   idiomas, nombre definitivo, página de tienda).
+
+## ADR-035 — Menú principal, pausa y opciones del jugador
+
+- **Contexto:** un juego de Steam no puede abrirse directamente en el sandbox, con la ayuda tapando el mapa
+  y sin forma de salir más que cerrando la ventana (`docs/STEAM.md`).
+- **Decisión:**
+  - Al arrancar, un **menú principal** sobre un sistema que se simula de fondo a ×10: *Continuar* (con la
+    descripción del guardado rápido), *Nueva partida* (semilla elegida o sistema al azar), *Opciones* y
+    *Salir*.
+  - **Esc** deselecciona y, si no hay nada seleccionado, abre la **pausa**: la simulación se detiene y el
+    HUD se oculta. Desde ella se puede continuar, guardar, cargar, abrir las opciones, volver al menú o salir
+    al escritorio (estos dos, con confirmación). Esc retrocede un nivel.
+  - **Opciones:** ventana o pantalla completa, sincronización vertical, escala de la interfaz (75–200 %,
+    sobre la de la pantalla), ayuda al empezar y la carpeta de datos (con un botón para abrirla). Se
+    aplican al momento y se guardan en `settings.ini` (`Game/Presentation/UserSettings.h`: formato
+    `clave=valor` que ignora claves desconocidas y valores inválidos, con tests).
+  - Las capturas (`--frames`) siguen entrando directamente al juego. `--menu main|pause|options` captura los
+    menús, y la prueba de humo del paquete arranca el juego y el menú.
+  - **El guardado lleva la semilla del sistema.** Cargar mientras corre otra partida (la del menú, o una
+    nueva) dejaba el sandbox con la semilla de esa otra partida para sus flujos aleatorios. El fallo ya
+    existía con F9 tras "Nueva partida", y el menú lo habría hecho habitual. Hay un test que lo cubre.
+- **Verificación:** el cliente se compila también en Linux con las fuentes fijadas de SDL3 3.4.16 (crate
+  `sdl3-src`) y Dear ImGui 1.92.9b, y se renderiza sin ventana (`SDL_VIDEO_DRIVER=offscreen`, renderizador
+  software). Así se revisaron capturas de cada menú; en Windows lo comprueba la CI.

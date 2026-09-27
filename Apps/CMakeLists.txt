@@ -11,6 +11,7 @@ if(GX_BUILD_CLIENT)
         Game/InspectorView.h
         Game/MapView.cpp
         Game/MapView.h
+        Game/Menus.cpp
         Game/main.cpp
     )
     target_link_libraries(gx_game PRIVATE gx_gameplay gx_imgui)

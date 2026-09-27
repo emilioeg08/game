@@ -301,5 +301,8 @@ solo como referencia conceptual: la interfaz, los nombres y los assets serán or
     economía, la política y la sucesión deberán diseñarse para avanzar a ritmo real. El universo lejano
     (otros sistemas) tendrá que simularse de forma agregada (LOD 0–1) para no pagar su coste en tiempo real.
 11. **Dependencias descargadas al configurar.** SDL3 e ImGui se descargan de GitHub (versiones y SHA-256
-    fijados) la primera vez que se configura cada preset. Sin red, usar `-DGX_BUILD_CLIENT=OFF`.
+    fijados) la primera vez que se configura cada preset. Sin red, usar `-DGX_BUILD_CLIENT=OFF`; sin acceso
+    a GitHub, apuntar `FETCHCONTENT_SOURCE_DIR_SDL3` y `FETCHCONTENT_SOURCE_DIR_IMGUI` a copias locales de las
+    mismas versiones (en Linux sin X11, SDL con `-DSDL_UNIX_CONSOLE_BUILD=ON -DSDL_X11=OFF -DSDL_WAYLAND=OFF`
+    y `SDL_VIDEO_DRIVER=offscreen` para capturas).
 12. **Diseño provisional.** Todo el diseño de juego es mío hasta que exista `game.md` (DESIGN.md).

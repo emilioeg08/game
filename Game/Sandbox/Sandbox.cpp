@@ -1825,6 +1825,7 @@ std::string Sandbox::nameOf(const World& world, EntityId entity) const {
 }
 
 void Sandbox::writeState(BinaryWriter& writer) const {
+    writer.io(m_config.seed); // the random streams of a loaded game are its own, whatever game was running
     writer.io(m_player);
     writer.io(m_playerRespawnAt);
     writer.io(m_lastPlayerHit);
@@ -1856,6 +1857,7 @@ void Sandbox::writeState(BinaryWriter& writer) const {
 }
 
 void Sandbox::readState(BinaryReader& reader) {
+    reader.io(m_config.seed);
     reader.io(m_player);
     reader.io(m_playerRespawnAt);
     reader.io(m_lastPlayerHit);

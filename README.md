@@ -92,11 +92,14 @@ prueba en Windows (MSVC) en cada push. Guía completa, y lo que falta para la ti
 Controles: rueda = zoom · arrastrar = mover · clic = seleccionar · **clic derecho = ir allí** ·
 WASD = empuje manual · X = frenar · E = atacar el contacto seleccionado · C = alto el fuego · B = abordar · K = contratos ·
 R/T = radar/transpondedor · ventana Mercado al atracar · Espacio = pausa · 1/2/3 = ×1 (tiempo real)/×3/×10 · H/F = seguir ·
-F5/F9 = guardar/cargar · F11 = pantalla completa · F3 = depuración · F1 = ayuda. La primera configuración descarga SDL3 y Dear ImGui
+F5/F9 = guardar/cargar · F11 = pantalla completa · Esc = deseleccionar o pausa · F3 = depuración · F1 = ayuda.
+El juego empieza en el menú principal (continuar, nueva partida con semilla, opciones); las opciones se
+guardan en `%APPDATA%\GalaxyEngine\Sandbox\settings.ini`. La primera configuración descarga SDL3 y Dear ImGui
 (versiones fijadas); `-DGX_BUILD_CLIENT=OFF` compila sin el cliente.
 
 Modo captura para comprobaciones automáticas:
-`gx_game.exe --frames 60 --prerun-hours 30 --select --screenshot captura.png` (`--no-help` cierra la ayuda). Hay un combate reproducible
+`gx_game.exe --frames 60 --prerun-hours 30 --select --screenshot captura.png` (`--no-help` cierra la ayuda;
+`--menu main|pause|options` captura los menús; `--data-dir` usa otra carpeta de datos). Hay un combate reproducible
 con `gx_game.exe --seed 1 --fly-to 1 --prerun-hours 0.0745 --engage-nearest --zoom 1100 --frames 20
 --screenshot combate.png`.
 
@@ -148,6 +151,6 @@ cmake/ scripts/ tools/
   combate, economía, NPC, controles).
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md): capas, tiempo, pipeline, presentación, threading,
   entidades, eventos, comandos, persistencia, determinismo, LOD, referencias, contradicciones y riesgos.
-- [docs/DECISIONS.md](docs/DECISIONS.md): registro de decisiones (ADR-001 a ADR-034).
+- [docs/DECISIONS.md](docs/DECISIONS.md): registro de decisiones (ADR-001 a ADR-035).
 - [docs/BENCHMARKS.md](docs/BENCHMARKS.md): método y resultados medidos por hito.
 - [docs/STEAM.md](docs/STEAM.md): empaquetado para Windows, subida a Steam y lo que falta para la tienda.

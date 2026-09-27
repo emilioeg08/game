@@ -3,7 +3,7 @@
 //
 //   gx_game [--seed <n>] [--frames <n> --screenshot <file.png>] [--prerun-hours <h>] [--zoom <m/px>]
 //           [--follow-star] [--select] [--select-port <i>] [--truth] [--fly-to <port index>]
-//           [--engage-nearest] [--data-dir <folder>]
+//           [--engage-nearest] [--data-dir <folder>] [--menu main|pause|options]
 //
 // On Windows the release build is a GUI program (no console): SDL_main.h supplies the WinMain entry point
 // and hands main() its arguments in UTF-8.
@@ -58,6 +58,9 @@ int main(int argc, char** argv) {
             ok = parseNumber(value(), options.selectPort);
         } else if (arg == "--select") {
             options.select = true;
+        } else if (arg == "--menu") {
+            options.menu = std::string(value());
+            ok = options.menu == "main" || options.menu == "pause" || options.menu == "options";
         } else if (arg == "--data-dir") {
             options.dataDir = std::string(value());
             ok = !options.dataDir.empty();

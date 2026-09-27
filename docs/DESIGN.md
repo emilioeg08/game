@@ -524,6 +524,7 @@ servicio de la deuda (cuota + intereses). Además necesita la caja: conserva el 
 | Seguir tu nave / la selección | H / F |
 | Guardar / cargar | F5 / F9 (en `%APPDATA%\GalaxyEngine\Sandbox\saves`) |
 | Pantalla completa | F11 o Alt+Intro |
+| Pausa (continuar, guardar, cargar, opciones, menú, salir) | Esc, si no hay nada seleccionado |
 | Depuración / ayuda | F3 / F1 |
 
 ## Lenguaje visual

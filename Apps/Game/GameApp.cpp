@@ -37,18 +37,15 @@ constexpr const char* kSaveDirectory = "saves";
 constexpr const char* kQuickSaveFile = "quicksave.gxsave";
 constexpr f64 kStandardGravity = 9.80665;
 
-// Deferred actions: executed at the start of a frame so no view of the old session survives mid-frame.
-enum class PendingAction { None, NewGame, Save, Load };
-PendingAction g_pendingAction = PendingAction::None;
-
 ImVec4 color(u8 r, u8 g, u8 b, u8 a = 255) {
     return {static_cast<float>(r) / 255.0f, static_cast<float>(g) / 255.0f, static_cast<float>(b) / 255.0f,
             static_cast<float>(a) / 255.0f};
 }
 
 void applyStyle(float scale) {
-    ImGui::StyleColorsDark();
     ImGuiStyle& style = ImGui::GetStyle();
+    style = ImGuiStyle(); // sizes from scratch: the scale can change at run time (options)
+    ImGui::StyleColorsDark(&style);
     style.WindowRounding = 4.0f;
     style.FrameRounding = 3.0f;
     style.WindowBorderSize = 1.0f;
@@ -88,6 +85,8 @@ bool GameApp::initDataDirectory(const std::string& overridePath) {
     } else {
         m_dataDir = pathFromUtf8(overridePath);
     }
+    std::error_code absolute;
+    m_dataDir = std::filesystem::absolute(m_dataDir, absolute);
     std::error_code ec;
     std::filesystem::create_directories(m_dataDir / kSaveDirectory, ec);
     std::filesystem::create_directories(m_dataDir / "logs", ec);
@@ -101,6 +100,7 @@ bool GameApp::initDataDirectory(const std::string& overridePath) {
         logging::addSink(m_logFile);
     }
     m_imguiIniPath = pathToUtf8(m_dataDir / "imgui.ini");
+    m_settings = loadUserSettings(m_dataDir / "settings.ini");
     GX_LOG_INFO(kChannel, "GalaxyEngine {} ({}), data folder {}", GX_VERSION, GX_BUILD_CONFIG,
                 pathToUtf8(m_dataDir));
     return true;
@@ -121,6 +121,7 @@ bool GameApp::initPlatform(const Options& options) {
     if (scale <= 0.0f) {
         scale = 1.0f;
     }
+    m_displayScale = scale;
     m_window = SDL_CreateWindow("GalaxyEngine - Sandbox", static_cast<int>(1440 * scale),
                                 static_cast<int>(900 * scale),
                                 SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIDDEN | SDL_WINDOW_HIGH_PIXEL_DENSITY);
@@ -134,7 +135,6 @@ bool GameApp::initPlatform(const Options& options) {
         SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "GalaxyEngine", SDL_GetError(), m_window);
         return false;
     }
-    SDL_SetRenderVSync(m_renderer, 1);
     SDL_SetWindowPosition(m_window, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
     SDL_ShowWindow(m_window);
 
@@ -148,11 +148,11 @@ bool GameApp::initPlatform(const Options& options) {
     if (std::filesystem::exists(uiFont, ec)) {
         io.Fonts->AddFontFromFileTTF(uiFont.string().c_str(), 17.0f);
     }
-    applyStyle(scale);
+    applySettings(); // style and UI scale, vsync, fullscreen
     ImGui_ImplSDL3_InitForSDLRenderer(m_window, m_renderer);
     ImGui_ImplSDLRenderer3_Init(m_renderer);
     GX_LOG_INFO(kChannel, "window ready ({}), renderer '{}', UI scale {:.2f}", SDL_GetCurrentVideoDriver(),
-                SDL_GetRendererName(m_renderer), scale);
+                SDL_GetRendererName(m_renderer), scale * m_settings.uiScale);
     return true;
 }
 
@@ -224,7 +224,18 @@ int GameApp::run(const Options& options) {
         m_selected = sandbox().ports()[static_cast<usize>(options.selectPort)];
     }
     m_showTruth = options.showTruth;
-    m_showHelp = !options.hideHelp;
+    m_menuSeed = options.seed;
+    // Players start at the main menu; captures go straight into the game unless they ask for a menu.
+    if (options.menu == "pause") {
+        startPlaying();
+        m_pauseMenu = true;
+    } else if (options.frames > 0 && options.menu.empty()) {
+        startPlaying();
+    } else {
+        enterMainMenu();
+        m_showOptions = options.menu == "options";
+    }
+    m_showHelp = m_showHelp && !options.hideHelp;
 
     u32 frame = 0;
     u64 lastNs = platform::monotonicNanoseconds();
@@ -247,16 +258,25 @@ int GameApp::run(const Options& options) {
             continue;
         }
 
-        switch (std::exchange(g_pendingAction, PendingAction::None)) {
+        switch (std::exchange(m_pending, PendingAction::None)) {
         case PendingAction::NewGame:
-            m_config.seed = mix64(nowNs) % 1'000'000; // fresh galaxy, still a readable seed
+            // A chosen seed, or a fresh galaxy with a still readable seed.
+            m_config.seed = std::exchange(m_newGameSeed, std::nullopt).value_or(mix64(nowNs) % 1'000'000);
             newGame();
+            startPlaying();
             break;
         case PendingAction::Save:
             quickSave();
             break;
         case PendingAction::Load:
-            quickLoad();
+            if (quickLoad()) {
+                startPlaying();
+            }
+            break;
+        case PendingAction::MainMenu:
+            m_config.seed = mix64(nowNs) % 1'000'000;
+            newGame();
+            enterMainMenu();
             break;
         case PendingAction::None:
             break;
@@ -266,7 +286,12 @@ int GameApp::run(const Options& options) {
         ImGui_ImplSDL3_NewFrame();
         ImGui::NewFrame();
 
-        handleKeyboard();
+        const bool playing = m_screen == Screen::Playing && !menuOpen();
+        if (playing) {
+            handleKeyboard();
+        } else {
+            handleMenuKeyboard();
+        }
         advanceSimulation(realDeltaNs);
         m_snapshotBuilder.build(simulation(), sandbox(), m_snapshot);
         if (sandbox().playerShip() != m_knownPlayer) {
@@ -277,25 +302,47 @@ int GameApp::run(const Options& options) {
             }
             m_knownPlayer = sandbox().playerShip();
         }
-        handleMap(
-            m_map.update(m_snapshot, MapSelection{m_selected, m_selectedContact}, MapOptions{m_showTruth}));
+        const MapView::Interaction interaction =
+            m_map.update(m_snapshot, MapSelection{m_selected, m_selectedContact}, MapOptions{m_showTruth});
+        if (!playing) {
+            // Menus over the map: the HUD is hidden and the map dimmed.
+            const ImVec2 display = ImGui::GetIO().DisplaySize;
+            ImGui::GetBackgroundDrawList()->AddRectFilled(
+                {0.0f, 0.0f}, display,
+                m_screen == Screen::MainMenu ? IM_COL32(4, 6, 12, 110) : IM_COL32(4, 6, 12, 170));
+            if (m_screen == Screen::MainMenu) {
+                drawMainMenu();
+            } else {
+                drawPauseMenu();
+            }
+            if (m_showOptions) {
+                drawOptionsWindow();
+            }
+            if (m_confirm != Confirm::None) {
+                drawConfirmation();
+            }
+        } else {
+            handleMap(interaction);
+        }
 
-        drawTimeBar();
-        drawShipPanel();
-        drawSelectionPanel();
-        drawSensorsPanel();
-        drawMarketWindow();
-        if (m_showContracts) {
-            drawContractsWindow();
+        if (playing) {
+            drawTimeBar();
+            drawShipPanel();
+            drawSelectionPanel();
+            drawSensorsPanel();
+            drawMarketWindow();
+            if (m_showContracts) {
+                drawContractsWindow();
+            }
+            drawJournal();
+            if (m_showDebug) {
+                drawDebugPanel();
+            }
+            if (m_showHelp) {
+                drawHelp();
+            }
         }
-        drawJournal();
-        if (m_showDebug) {
-            drawDebugPanel();
-        }
-        if (m_showHelp) {
-            drawHelp();
-        }
-        if (!m_snapshot.playerAlive) {
+        if (playing && !m_snapshot.playerAlive) {
             const ImVec2 display = ImGui::GetIO().DisplaySize;
             const std::string text = std::format("NAVE DESTRUIDA  ·  una nave nueva te espera en {:.0f} s",
                                                  m_snapshot.playerRespawnIn);
@@ -355,10 +402,26 @@ void GameApp::newGame() {
 }
 
 void GameApp::toggleFullscreen() {
+    m_settings.fullscreen = !m_settings.fullscreen;
+    applySettings();
+    saveSettings();
+}
+
+void GameApp::applySettings() {
+    applyStyle(m_displayScale * m_settings.uiScale);
+    SDL_SetRenderVSync(m_renderer, m_settings.vsync ? 1 : 0);
     const bool fullscreen = (SDL_GetWindowFlags(m_window) & SDL_WINDOW_FULLSCREEN) != 0;
-    if (!SDL_SetWindowFullscreen(m_window, !fullscreen)) { // borderless, at the desktop's resolution
-        GX_LOG_WARN(kChannel, "cannot change to {}: {}", fullscreen ? "windowed" : "fullscreen",
+    // Borderless, at the desktop's resolution.
+    if (fullscreen != m_settings.fullscreen && !SDL_SetWindowFullscreen(m_window, m_settings.fullscreen)) {
+        GX_LOG_WARN(kChannel, "cannot change to {}: {}", m_settings.fullscreen ? "fullscreen" : "windowed",
                     SDL_GetError());
+    }
+}
+
+void GameApp::saveSettings() {
+    std::string error;
+    if (!saveUserSettings(m_dataDir / "settings.ini", m_settings, error)) {
+        GX_LOG_WARN(kChannel, "cannot save the settings: {}", error);
     }
 }
 
@@ -378,18 +441,18 @@ void GameApp::quickSave() {
     }
 }
 
-void GameApp::quickLoad() {
+bool GameApp::quickLoad() {
     SaveFileContents contents;
     std::string error;
     if (!readSaveFile(m_dataDir / kSaveDirectory / kQuickSaveFile, contents, error)) {
         setStatus("No se pudo cargar: " + error);
-        return;
+        return false;
     }
     // Load into a fresh session and swap only on success: a failed load leaves the current game untouched.
     auto loaded = std::make_unique<Session>(m_jobs, m_config);
     if (!loaded->simulation.loadState(contents.payload, error)) {
         setStatus("Partida incompatible: " + error);
-        return;
+        return false;
     }
     m_session = std::move(loaded);
     m_snapshotBuilder = SnapshotBuilder{};
@@ -400,7 +463,9 @@ void GameApp::quickLoad() {
     m_knownPlayer = sandbox().playerShip();
     m_map.camera().follow = sandbox().playerShip();
     resetTimeController();
+    m_config.seed = sandbox().config().seed; // the loaded game's
     setStatus(std::format("Partida cargada: {}", contents.info.description));
+    return true;
 }
 
 void GameApp::resetTimeController() {
@@ -411,7 +476,8 @@ void GameApp::resetTimeController() {
 }
 
 void GameApp::advanceSimulation(u64 realDeltaNs) {
-    m_time.setPaused(m_paused);
+    // The game stops under the pause menu; the main menu's background system keeps running.
+    m_time.setPaused(m_paused || (m_screen == Screen::Playing && menuOpen()));
     m_time.setSpeed(kSpeeds[m_speedIndex]);
     const SimTime target = m_time.update(realDeltaNs, simulation().now());
     const u64 stepsBefore = simulation().stepCount();
@@ -476,18 +542,22 @@ void GameApp::handleKeyboard() {
         m_showDebug = !m_showDebug;
     }
     if (ImGui::IsKeyPressed(ImGuiKey_F5, false)) {
-        g_pendingAction = PendingAction::Save;
+        m_pending = PendingAction::Save;
     }
     if (ImGui::IsKeyPressed(ImGuiKey_F9, false)) {
-        g_pendingAction = PendingAction::Load;
+        m_pending = PendingAction::Load;
     }
     if (ImGui::IsKeyPressed(ImGuiKey_F11, false) ||
         (ImGui::IsKeyPressed(ImGuiKey_Enter, false) && io.KeyAlt)) {
         toggleFullscreen();
     }
     if (ImGui::IsKeyPressed(ImGuiKey_Escape, false)) {
-        m_selected = {};
-        m_selectedContact = 0;
+        if (m_selected.isValid() || m_selectedContact != 0) {
+            m_selected = {};
+            m_selectedContact = 0;
+        } else {
+            m_pauseMenu = true; // nothing to deselect: the pause menu
+        }
     }
     if (ImGui::IsKeyPressed(ImGuiKey_R, false)) {
         submitSensors(!m_snapshot.playerSensors.activeOn, m_snapshot.playerSensors.transponderOn);
@@ -1261,15 +1331,15 @@ void GameApp::drawDebugPanel() {
                 static_cast<unsigned long long>(sandbox().stats().commandsRejected));
     ImGui::Checkbox("Mostrar la verdad (omnisciencia de depuración)", &m_showTruth);
     if (ImGui::Button("Guardar (F5)")) {
-        g_pendingAction = PendingAction::Save;
+        m_pending = PendingAction::Save;
     }
     ImGui::SameLine();
     if (ImGui::Button("Cargar (F9)")) {
-        g_pendingAction = PendingAction::Load;
+        m_pending = PendingAction::Load;
     }
     ImGui::SameLine();
     if (ImGui::Button("Nueva partida")) {
-        g_pendingAction = PendingAction::NewGame;
+        m_pending = PendingAction::NewGame;
     }
     if (ImGui::CollapsingHeader("Economía (verdad)")) {
         drawEconomyInspector();

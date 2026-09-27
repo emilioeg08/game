@@ -6,11 +6,13 @@
 #include "Engine/Jobs/JobSystem.h"
 #include "Engine/Time/TimeController.h"
 #include "Game/Presentation/SystemSnapshot.h"
+#include "Game/Presentation/UserSettings.h"
 #include "Game/Sandbox/Sandbox.h"
 #include "Simulation/Kernel/Simulation.h"
 
 #include <filesystem>
 #include <memory>
+#include <optional>
 #include <string>
 
 struct SDL_Window;
@@ -38,6 +40,9 @@ public:
         bool engageNearest = false; // after the prerun: attack the nearest contact and fight for 3 s
         bool hideHelp = false;      // start with the controls window closed
         std::string dataDir;        // UTF-8; empty: the user's data folder (%APPDATA% on Windows)
+        // Where to start: "" (the main menu; straight into the game when capturing frames), "main",
+        // "pause" or "options" (captures of the menus).
+        std::string menu;
     };
 
     GameApp();
@@ -64,7 +69,25 @@ private:
 
     void newGame();
     void quickSave();
-    void quickLoad();
+    bool quickLoad();
+
+    // Menus (Apps/Game/Menus.cpp, ADR-035). The main menu runs a fresh system in the background; the pause
+    // menu stops the simulation and hides the HUD.
+    enum class Screen : u8 { MainMenu, Playing };
+    enum class Confirm : u8 { None, MainMenu, Quit };
+    // Deferred actions: executed at the start of a frame so no view of the old session survives mid-frame.
+    enum class PendingAction : u8 { None, NewGame, Save, Load, MainMenu };
+    void enterMainMenu();
+    void startPlaying();
+    void handleMenuKeyboard();
+    void drawMainMenu();
+    void drawPauseMenu();
+    void drawOptionsWindow();
+    void drawConfirmation();
+    void refreshSaveSummary();
+    void applySettings();
+    void saveSettings();
+    [[nodiscard]] bool menuOpen() const;
     void resetTimeController();
     void advanceSimulation(u64 realDeltaNs);
 
@@ -102,6 +125,18 @@ private:
     std::filesystem::path m_dataDir;
     std::string m_imguiIniPath; // UTF-8, kept alive for ImGui
     std::shared_ptr<FileLogSink> m_logFile;
+    UserSettings m_settings;
+    float m_displayScale = 1.0f; // the display's content scale; the UI uses it times m_settings.uiScale
+
+    Screen m_screen = Screen::MainMenu;
+    bool m_pauseMenu = false;
+    bool m_showOptions = false;
+    Confirm m_confirm = Confirm::None;
+    PendingAction m_pending = PendingAction::None;
+    bool m_seedPanel = false;
+    u64 m_menuSeed = 2400;
+    std::optional<u64> m_newGameSeed; // with PendingAction::NewGame; none: a random galaxy
+    std::string m_saveSummary;        // the quick save's description, empty if there is none
 
     JobSystem m_jobs;
     SandboxConfig m_config;

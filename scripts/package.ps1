@@ -6,8 +6,8 @@
     dist/GalaxyEngine/        the game as installed by Steam: gx_game.exe and licenses/ (no PDB, no tests)
     dist/symbols/             gx_game.pdb, to symbolize crash dumps (never shipped)
     dist/GalaxyEngine-<version>-windows-x64.zip
-    With -Smoke, the packaged executable is started once: 60 frames into a throwaway data folder, and a
-    screenshot. It must exit cleanly.
+    Unless -NoSmoke, the packaged executable is started twice into a throwaway data folder: the game and the
+    main menu, 60 frames each, with a screenshot. Both must exit cleanly.
 
 .EXAMPLE
     ./scripts/package.ps1                  # build, test, package, smoke test
@@ -49,13 +49,19 @@ if (-not $NoSmoke) {
     $smoke = Join-Path $dist 'smoke'
     if (Test-Path $smoke) { Remove-Item -Recurse -Force $smoke }
     New-Item -ItemType Directory -Path $smoke | Out-Null
-    $shot = Join-Path $smoke 'smoke.png'
-    $process = Start-Process -FilePath $exe -Wait -PassThru -WorkingDirectory $content -ArgumentList @(
-        '--frames', '60', '--no-help', '--prerun-hours', '0.5', '--data-dir', "`"$smoke`"", '--screenshot', "`"$shot`"")
-    $log = Join-Path $smoke 'logs\gx_game.log'
-    if (Test-Path $log) { Get-Content $log | Select-Object -Last 20 | ForEach-Object { Write-Host "    $_" } }
-    if ($process.ExitCode -ne 0) { throw "gx_game.exe exited with code $($process.ExitCode)" }
-    if (-not (Test-Path $shot)) { throw 'gx_game.exe did not write its screenshot' }
+    $runs = @(
+        @{ Shot = 'game.png'; Args = @('--no-help', '--prerun-hours', '0.5') },
+        @{ Shot = 'menu.png'; Args = @('--menu', 'main') }
+    )
+    foreach ($run in $runs) {
+        $shot = Join-Path $smoke $run.Shot
+        $arguments = @('--frames', '60', '--data-dir', "`"$smoke`"", '--screenshot', "`"$shot`"") + $run.Args
+        $process = Start-Process -FilePath $exe -Wait -PassThru -WorkingDirectory $content -ArgumentList $arguments
+        $log = Join-Path $smoke 'logs\gx_game.log'
+        if (Test-Path $log) { Get-Content $log | Select-Object -Last 10 | ForEach-Object { Write-Host "    $_" } }
+        if ($process.ExitCode -ne 0) { throw "gx_game.exe exited with code $($process.ExitCode) ($($run.Shot))" }
+        if (-not (Test-Path $shot)) { throw "gx_game.exe did not write $($run.Shot)" }
+    }
 }
 
 $version = (Select-String -Path (Join-Path $root 'CMakeLists.txt') -Pattern 'VERSION (\d+\.\d+\.\d+)').Matches[0].Groups[1].Value
