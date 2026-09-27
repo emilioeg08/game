@@ -2,6 +2,7 @@
 
 #include "Engine/Core/Types.h"
 
+#include <filesystem>
 #include <format>
 #include <iosfwd>
 #include <memory>
@@ -46,7 +47,7 @@ public:
 
 class FileLogSink final : public LogSink {
 public:
-    explicit FileLogSink(const std::string& path);
+    explicit FileLogSink(const std::filesystem::path& path);
     ~FileLogSink() override;
     [[nodiscard]] bool isOpen() const;
     void write(const LogRecord& record) override;

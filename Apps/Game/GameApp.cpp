@@ -2,6 +2,7 @@
 
 #include "Engine/Core/Hash.h"
 #include "Engine/Core/Log.h"
+#include "Engine/Core/Paths.h"
 #include "Engine/Core/Platform.h"
 #include "Engine/Profiling/Profiler.h"
 #include "Engine/Serialization/SaveFile.h"
@@ -28,8 +29,12 @@ constexpr std::array<u32, 3> kSpeeds = {1, 3, 10};
 constexpr std::array<const char*, 3> kSpeedLabels = {"x1", "x3", "x10"};
 constexpr u64 kSimulationBudgetNs = 8'000'000; // per frame: keeps the client responsive at any speed
 constexpr u64 kStatusDurationNs = 4'000'000'000;
+// The user's data folder: %APPDATA%\GalaxyEngine\Sandbox on Windows. Steam Cloud is set up on this path, so
+// it must not change once the game ships (docs/STEAM.md).
+constexpr const char* kDataOrganization = "GalaxyEngine";
+constexpr const char* kDataApplication = "Sandbox";
 constexpr const char* kSaveDirectory = "saves";
-constexpr const char* kQuickSavePath = "saves/quicksave.gxsave";
+constexpr const char* kQuickSaveFile = "quicksave.gxsave";
 constexpr f64 kStandardGravity = 9.80665;
 
 // Deferred actions: executed at the start of a frame so no view of the old session survives mid-frame.
@@ -71,9 +76,45 @@ GameApp::GameApp() : m_jobs(JobSystem::defaultWorkerCount()) {}
 
 GameApp::~GameApp() = default;
 
-bool GameApp::initPlatform() {
+bool GameApp::initDataDirectory(const std::string& overridePath) {
+    if (overridePath.empty()) {
+        char* pref = SDL_GetPrefPath(kDataOrganization, kDataApplication);
+        if (pref == nullptr) {
+            GX_LOG_ERROR(kChannel, "no user data folder: {}", SDL_GetError());
+            return false;
+        }
+        m_dataDir = pathFromUtf8(pref);
+        SDL_free(pref);
+    } else {
+        m_dataDir = pathFromUtf8(overridePath);
+    }
+    std::error_code ec;
+    std::filesystem::create_directories(m_dataDir / kSaveDirectory, ec);
+    std::filesystem::create_directories(m_dataDir / "logs", ec);
+    if (ec) {
+        GX_LOG_ERROR(kChannel, "cannot create the data folder {}: {}", pathToUtf8(m_dataDir), ec.message());
+        return false;
+    }
+    // The log of the last session, for bug reports (the release build has no console).
+    m_logFile = std::make_shared<FileLogSink>(m_dataDir / "logs" / "gx_game.log");
+    if (m_logFile->isOpen()) {
+        logging::addSink(m_logFile);
+    }
+    m_imguiIniPath = pathToUtf8(m_dataDir / "imgui.ini");
+    GX_LOG_INFO(kChannel, "GalaxyEngine {} ({}), data folder {}", GX_VERSION, GX_BUILD_CONFIG,
+                pathToUtf8(m_dataDir));
+    return true;
+}
+
+bool GameApp::initPlatform(const Options& options) {
     if (!SDL_Init(SDL_INIT_VIDEO)) {
         GX_LOG_ERROR(kChannel, "SDL_Init failed: {}", SDL_GetError());
+        SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "GalaxyEngine", SDL_GetError(), nullptr);
+        return false;
+    }
+    if (!initDataDirectory(options.dataDir)) {
+        SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "GalaxyEngine",
+                                 "No se puede crear la carpeta de datos del usuario.", nullptr);
         return false;
     }
     float scale = SDL_GetDisplayContentScale(SDL_GetPrimaryDisplay());
@@ -90,6 +131,7 @@ bool GameApp::initPlatform() {
     m_renderer = SDL_CreateRenderer(m_window, nullptr);
     if (m_renderer == nullptr) {
         GX_LOG_ERROR(kChannel, "SDL_CreateRenderer failed: {}", SDL_GetError());
+        SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "GalaxyEngine", SDL_GetError(), m_window);
         return false;
     }
     SDL_SetRenderVSync(m_renderer, 1);
@@ -99,6 +141,7 @@ bool GameApp::initPlatform() {
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
     ImGuiIO& io = ImGui::GetIO();
+    io.IniFilename = m_imguiIniPath.c_str(); // window layout, in the user's folder
     // No keyboard navigation: the keyboard belongs to the game (WASD, speeds) unless a text field is active.
     const std::filesystem::path uiFont = "C:/Windows/Fonts/segoeui.ttf";
     std::error_code ec;
@@ -126,11 +169,16 @@ void GameApp::shutdownPlatform() {
         SDL_DestroyWindow(m_window);
     }
     SDL_Quit();
+    if (m_logFile != nullptr) {
+        logging::flush();
+        logging::removeSink(m_logFile.get());
+        m_logFile.reset();
+    }
 }
 
 int GameApp::run(const Options& options) {
     platform::setCurrentThreadName("main");
-    if (!initPlatform()) {
+    if (!initPlatform(options)) {
         shutdownPlatform();
         return 1;
     }
@@ -306,15 +354,24 @@ void GameApp::newGame() {
     setStatus(std::format("Nueva partida: sistema {} (semilla {})", sandbox().systemName(), m_config.seed));
 }
 
+void GameApp::toggleFullscreen() {
+    const bool fullscreen = (SDL_GetWindowFlags(m_window) & SDL_WINDOW_FULLSCREEN) != 0;
+    if (!SDL_SetWindowFullscreen(m_window, !fullscreen)) { // borderless, at the desktop's resolution
+        GX_LOG_WARN(kChannel, "cannot change to {}: {}", fullscreen ? "windowed" : "fullscreen",
+                    SDL_GetError());
+    }
+}
+
 void GameApp::quickSave() {
+    const std::filesystem::path path = m_dataDir / kSaveDirectory / kQuickSaveFile;
     std::error_code ec;
-    std::filesystem::create_directories(kSaveDirectory, ec);
+    std::filesystem::create_directories(path.parent_path(), ec);
     const std::vector<std::byte> payload = simulation().saveState();
     const std::string description = std::format("Sandbox {} - {}", sandbox().systemName(),
                                                 formatSimTime(simulation().now(), content::kEpochYear));
     std::string error;
-    if (writeSaveFile(kQuickSavePath, GX_VERSION, description, payload, error)) {
-        setStatus(std::format("Partida guardada en {} ({:.1f} KiB)", kQuickSavePath,
+    if (writeSaveFile(path, GX_VERSION, description, payload, error)) {
+        setStatus(std::format("Partida guardada en {} ({:.1f} KiB)", pathToUtf8(path),
                               static_cast<f64>(payload.size()) / 1024.0));
     } else {
         setStatus("Error al guardar: " + error);
@@ -324,7 +381,7 @@ void GameApp::quickSave() {
 void GameApp::quickLoad() {
     SaveFileContents contents;
     std::string error;
-    if (!readSaveFile(kQuickSavePath, contents, error)) {
+    if (!readSaveFile(m_dataDir / kSaveDirectory / kQuickSaveFile, contents, error)) {
         setStatus("No se pudo cargar: " + error);
         return;
     }
@@ -423,6 +480,10 @@ void GameApp::handleKeyboard() {
     }
     if (ImGui::IsKeyPressed(ImGuiKey_F9, false)) {
         g_pendingAction = PendingAction::Load;
+    }
+    if (ImGui::IsKeyPressed(ImGuiKey_F11, false) ||
+        (ImGui::IsKeyPressed(ImGuiKey_Enter, false) && io.KeyAlt)) {
+        toggleFullscreen();
     }
     if (ImGui::IsKeyPressed(ImGuiKey_Escape, false)) {
         m_selected = {};
@@ -1264,6 +1325,7 @@ void GameApp::drawHelp() {
                       "boletín de precios de los comerciantes");
     ImGui::BulletText("H: seguir tu nave   ·   F: seguir la selección   ·   Esc: deseleccionar");
     ImGui::BulletText("F5: guardar   ·   F9: cargar   ·   F3: depuración   ·   F1: esta ayuda");
+    ImGui::BulletText("F11 o Alt+Intro: pantalla completa");
     ImGui::End();
 }
 

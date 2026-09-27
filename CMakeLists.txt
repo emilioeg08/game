@@ -18,8 +18,6 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 
-# Debug info embedded in object files (/Z7): no shared PDB server contention under parallel Ninja builds.
-set(CMAKE_MSVC_DEBUG_INFORMATION_FORMAT "$<$<CONFIG:Debug,RelWithDebInfo>:Embedded>")
 
 option(GX_WARNINGS_AS_ERRORS "Treat compiler warnings as errors" OFF)
 option(GX_FORCE_ASSERTS "Enable GX_ASSERT in optimized builds" OFF)
@@ -27,6 +25,18 @@ option(GX_ENABLE_PROFILING "Compile profiling zones (they can still be disabled 
 option(GX_BUILD_TESTS "Build unit tests" ON)
 option(GX_BUILD_BENCHMARKS "Build benchmarks" ON)
 option(GX_BUILD_CLIENT "Build the graphical client (downloads SDL3 and Dear ImGui at configure time)" ON)
+option(GX_CLIENT_CONSOLE "Windows: build the client as a console program (development)" OFF)
+
+# Shipping on Windows (ADR-034). The C runtime is linked statically: players need no Visual C++
+# redistributable, and the Steam depot no install script for it. Every configuration carries debug
+# information embedded in the objects (/Z7: no shared PDB server contention under parallel Ninja builds),
+# and release executables get a PDB, with the optimizations /DEBUG would otherwise turn off: crash dumps
+# from players can be symbolized.
+set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+set(CMAKE_MSVC_DEBUG_INFORMATION_FORMAT Embedded)
+if(MSVC)
+    add_link_options("$<$<CONFIG:Release>:/DEBUG;/OPT:REF;/OPT:ICF>")
+endif()
 
 include(cmake/GxCompileOptions.cmake)
 

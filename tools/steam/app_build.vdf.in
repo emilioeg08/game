@@ -1,0 +1,13 @@
+"AppBuild"
+{
+	"AppID" "@APPID@"
+	"Desc" "@DESC@"
+	"Preview" "@PREVIEW@"
+	"SetLive" "@BRANCH@"
+	"ContentRoot" "..\..\dist\GalaxyEngine\"
+	"BuildOutput" "output\"
+	"Depots"
+	{
+		"@DEPOTID@" "depot_build_windows.vdf"
+	}
+}

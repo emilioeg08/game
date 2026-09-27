@@ -19,3 +19,6 @@ CMakeUserPresets.json
 # Graphical client runtime files
 /saves/
 imgui.ini
+
+# Packaged game (scripts/package.ps1)
+/dist/

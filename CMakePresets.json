@@ -16,8 +16,8 @@
             "name": "debug",
             "inherits": "base",
             "displayName": "Debug",
-            "description": "No optimization, asserts on",
-            "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug" }
+            "description": "No optimization, asserts on, client with a console window",
+            "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug", "GX_CLIENT_CONSOLE": "ON" }
         },
         {
             "name": "release",

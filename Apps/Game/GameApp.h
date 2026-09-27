@@ -2,12 +2,14 @@
 
 #include "Apps/Game/InspectorView.h"
 #include "Apps/Game/MapView.h"
+#include "Engine/Core/Log.h"
 #include "Engine/Jobs/JobSystem.h"
 #include "Engine/Time/TimeController.h"
 #include "Game/Presentation/SystemSnapshot.h"
 #include "Game/Sandbox/Sandbox.h"
 #include "Simulation/Kernel/Simulation.h"
 
+#include <filesystem>
 #include <memory>
 #include <string>
 
@@ -35,6 +37,7 @@ public:
         i32 flyToPort = -1;         // order the player ship to this port (index in Sandbox::ports())
         bool engageNearest = false; // after the prerun: attack the nearest contact and fight for 3 s
         bool hideHelp = false;      // start with the controls window closed
+        std::string dataDir;        // UTF-8; empty: the user's data folder (%APPDATA% on Windows)
     };
 
     GameApp();
@@ -52,7 +55,11 @@ private:
         Simulation simulation;
     };
 
-    bool initPlatform();
+    bool initPlatform(const Options& options);
+    // Saves, logs and UI layout live in the user's profile, never next to the executable: a Steam install
+    // folder may be read-only, and Steam Cloud synchronises a fixed per-user folder (ADR-034).
+    bool initDataDirectory(const std::string& overridePath);
+    void toggleFullscreen();
     void shutdownPlatform();
 
     void newGame();
@@ -92,6 +99,9 @@ private:
 
     SDL_Window* m_window = nullptr;
     SDL_Renderer* m_renderer = nullptr;
+    std::filesystem::path m_dataDir;
+    std::string m_imguiIniPath; // UTF-8, kept alive for ImGui
+    std::shared_ptr<FileLogSink> m_logFile;
 
     JobSystem m_jobs;
     SandboxConfig m_config;

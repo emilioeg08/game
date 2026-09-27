@@ -63,7 +63,7 @@ void ConsoleLogSink::flush() {
     std::fflush(stderr);
 }
 
-FileLogSink::FileLogSink(const std::string& path)
+FileLogSink::FileLogSink(const std::filesystem::path& path)
     : m_file(std::make_unique<std::ofstream>(path, std::ios::out | std::ios::trunc)) {}
 
 FileLogSink::~FileLogSink() = default;

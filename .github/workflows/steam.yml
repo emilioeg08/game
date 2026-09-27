@@ -1,0 +1,51 @@
+# Uploads a build to Steam (manual). Builds and smoke-tests the Windows package first, then SteamPipe
+# uploads it to a beta branch. Configure it once (docs/STEAM.md):
+#   repository variable   STEAM_APP_ID (the Windows depot is the app id + 1, Steamworks' default)
+#   repository secrets    STEAM_USERNAME, STEAM_CONFIG_VDF (a builder account's authorized config.vdf)
+name: Steam upload
+
+on:
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: 'Steam branch to set the build live on (never "default"; empty: upload only)'
+        default: 'beta'
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    uses: ./.github/workflows/windows.yml
+
+  upload:
+    needs: windows
+    runs-on: ubuntu-24.04
+    environment: steam
+    steps:
+      - name: Check the configuration
+        env:
+          APP_ID: ${{ vars.STEAM_APP_ID }}
+          USERNAME: ${{ secrets.STEAM_USERNAME }}
+          CONFIG_VDF: ${{ secrets.STEAM_CONFIG_VDF }}
+          BRANCH: ${{ inputs.branch }}
+        run: |
+          [[ "$APP_ID" =~ ^[0-9]+$ ]] || { echo "::error::Set the STEAM_APP_ID variable (docs/STEAM.md)"; exit 1; }
+          [[ -n "$USERNAME" && -n "$CONFIG_VDF" ]] || { echo "::error::Set STEAM_USERNAME and STEAM_CONFIG_VDF (docs/STEAM.md)"; exit 1; }
+          [[ "$BRANCH" != "default" ]] || { echo "::error::Valve does not allow setting the default branch live from SteamCMD"; exit 1; }
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: GalaxyEngine-windows-x64
+          path: dist/GalaxyEngine
+
+      - uses: game-ci/steam-deploy@v3
+        with:
+          username: ${{ secrets.STEAM_USERNAME }}
+          configVdf: ${{ secrets.STEAM_CONFIG_VDF }}
+          appId: ${{ vars.STEAM_APP_ID }}
+          buildDescription: ${{ github.sha }}
+          rootPath: dist
+          depot1Path: GalaxyEngine
+          releaseBranch: ${{ inputs.branch }}

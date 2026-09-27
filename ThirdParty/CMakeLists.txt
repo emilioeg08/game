@@ -26,6 +26,10 @@ FetchContent_Declare(imgui
 
 FetchContent_MakeAvailable(sdl3 imgui)
 
+# Their licenses travel with the game (zlib and MIT: the notice must be included).
+install(FILES ${sdl3_SOURCE_DIR}/LICENSE.txt DESTINATION licenses RENAME SDL3.txt COMPONENT client)
+install(FILES ${imgui_SOURCE_DIR}/LICENSE.txt DESTINATION licenses RENAME DearImGui.txt COMPONENT client)
+
 add_library(gx_imgui STATIC
     ${imgui_SOURCE_DIR}/imgui.cpp
     ${imgui_SOURCE_DIR}/imgui_demo.cpp

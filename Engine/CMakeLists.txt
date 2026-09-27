@@ -4,6 +4,8 @@ add_library(gx_engine STATIC
     Core/Hash.h
     Core/Log.cpp
     Core/Log.h
+    Core/Paths.cpp
+    Core/Paths.h
     Core/Platform.cpp
     Core/Platform.h
     Core/Random.h

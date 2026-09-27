@@ -1,0 +1,68 @@
+# Windows build, the platform the game ships on (Steam). MSVC through scripts/build.ps1, the same path a
+# developer uses; then the package players get, started once as a smoke test (ADR-034).
+name: Windows
+
+on:
+  push:
+    branches: [master, 'claude/**']
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-windows-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: windows-2022
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Build tools (pinned CMake and Ninja)
+        run: python -m pip install -r tools/requirements-build.txt
+
+      - name: PowerShell scripts parse
+        shell: pwsh
+        run: |
+          $failed = $false
+          foreach ($file in Get-ChildItem -Recurse -Filter *.ps1) {
+            $errors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile($file.FullName, [ref]$null, [ref]$errors) | Out-Null
+            foreach ($e in $errors) { Write-Host "::error file=$($file.FullName)::$($e.Message)"; $failed = $true }
+          }
+          if ($failed) { exit 1 }
+
+      - name: Debug build and tests (asserts on)
+        shell: pwsh
+        run: ./scripts/build.ps1 -Preset debug -Test
+
+      - name: Release build, tests, package and smoke test
+        shell: pwsh
+        run: ./scripts/package.ps1
+
+      - name: Game package
+        uses: actions/upload-artifact@v4
+        with:
+          name: GalaxyEngine-windows-x64
+          path: dist/GalaxyEngine/
+          if-no-files-found: error
+
+      - name: Symbols and smoke test output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: symbols-and-smoke
+          path: |
+            dist/symbols/
+            dist/smoke/
+          if-no-files-found: ignore

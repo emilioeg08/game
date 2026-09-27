@@ -1,6 +1,7 @@
 #include "Tests/TestFramework.h"
 
 #include "Engine/Core/Hash.h"
+#include "Engine/Core/Paths.h"
 #include "Engine/Serialization/Binary.h"
 #include "Engine/Serialization/SaveFile.h"
 
@@ -243,4 +244,23 @@ GX_TEST(Serialization, SaveFileDetectsCorruption) {
     std::filesystem::remove(path);
 
     GX_EXPECT(!readSaveFile(tempPath("gx_test_missing.gxsave"), contents, error));
+}
+
+GX_TEST(Serialization, SaveFilesLiveInFoldersWithAnyName) {
+    // A Windows profile such as C:\\Users\\José: the path must be built from UTF-8, not the ANSI code page.
+    const std::string folder = "gx_test_Jos\xc3\xa9_\xc3\xb1";
+    GX_EXPECT(pathToUtf8(pathFromUtf8(folder)) == folder);
+    GX_EXPECT(pathFromUtf8(folder).u8string() == u8"gx_test_Jos\u00e9_\u00f1");
+    const std::filesystem::path directory = std::filesystem::temp_directory_path() / pathFromUtf8(folder);
+    std::error_code ec;
+    std::filesystem::create_directories(directory, ec);
+    GX_REQUIRE(!ec);
+    const std::filesystem::path path = directory / pathFromUtf8("partida r\xc3\xa1pida.gxsave");
+    const std::vector<std::byte> payload = {std::byte{1}, std::byte{2}, std::byte{3}};
+    std::string error;
+    GX_REQUIRE(writeSaveFile(path, "test", "Partida de Jos\xc3\xa9", payload, error));
+    SaveFileContents contents;
+    GX_REQUIRE(readSaveFile(path, contents, error));
+    GX_EXPECT(contents.payload == payload);
+    std::filesystem::remove_all(directory, ec);
 }
