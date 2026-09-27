@@ -514,3 +514,32 @@ sustituya y explique por qué.
     suerte (la semilla 99 da entre 3.900 y 7.600 t según perturbaciones mínimas).
   - Pendiente: crédito y seguro para el jugador, seguro de la carga y piratas con economía propia (siguen
     reapareciendo gratis).
+
+## ADR-034 — Windows como plataforma de lanzamiento (Steam): datos del usuario, UTF-8, paquete y CI
+
+- **Contexto:** el juego se publicará en Steam para Windows. Hasta ahora el cliente escribía las partidas en
+  `saves/` junto al directorio de trabajo, abría una consola, dependía del redistribuible de Visual C++ y
+  solo se había compilado en el PC del desarrollador.
+- **Decisión:**
+  - Datos del jugador en `SDL_GetPrefPath("GalaxyEngine", "Sandbox")` (`%APPDATA%\GalaxyEngine\Sandbox`):
+    partidas, `logs/gx_game.log` e `imgui.ini`. `--data-dir` lo cambia. Es la ruta que usa Steam Cloud, así
+    que no puede cambiar tras el lanzamiento.
+  - **UTF-8 de extremo a extremo:** `pathFromUtf8`/`pathToUtf8` (`Engine/Core/Paths.h`) para toda ruta que
+    venga de texto, y un manifiesto con `activeCodePage` UTF-8. Un `std::filesystem::path` construido desde
+    un `std::string` usa la página ANSI en Windows y rompe perfiles como `C:\Users\José`, frecuentes entre
+    nuestros jugadores.
+  - `gx_game.exe`: subsistema GUI (`SDL_main.h` da el `WinMain`; consola con `GX_CLIENT_CONSOLE`, activado en
+    el preset debug), icono y recurso de versión, **CRT estático** (sin redistribuible, sin script de
+    instalación en Steam) y PDB en Release (`/DEBUG /OPT:REF /OPT:ICF`: mismo código, volcados legibles).
+  - Componentes de instalación `client` (el depot, con las licencias de SDL3 y Dear ImGui) y `symbols`.
+    `scripts/package.ps1` compila, prueba, empaqueta y arranca el paquete; `scripts/steam-upload.ps1` y
+    `tools/steam/` suben con SteamCMD.
+  - **CI en Windows** (GitHub Actions, `windows-2022`, MSVC, por los mismos scripts que un desarrollador):
+    tests en debug y release, paquete y prueba de humo. Un workflow manual sube a una rama beta de Steam.
+- **Alternativas descartadas:**
+  - Redistribuible de VC++ mediante el script de instalación de Steam: un paso más que puede fallar en el PC
+    del jugador, sin ventaja para un ejecutable único.
+  - Integrar ya el SDK de Steamworks: no es obligatorio para publicar, su descarga requiere la cuenta de
+    socio y conviene hacerlo detrás de una capa opcional cuando haya logros.
+- **Consecuencias:** `docs/STEAM.md` recoge el alta, la subida y lo que falta de producto (menú, audio,
+  idiomas, nombre definitivo, página de tienda).

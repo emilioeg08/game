@@ -522,7 +522,8 @@ servicio de la deuda (cuota + intereses). Además necesita la caja: conserva el 
 | Contratos | K (se aceptan atracado en una estación) |
 | Pausa / velocidad | Espacio / 1 (×1), 2 (×3), 3 (×10) |
 | Seguir tu nave / la selección | H / F |
-| Guardar / cargar | F5 / F9 |
+| Guardar / cargar | F5 / F9 (en `%APPDATA%\GalaxyEngine\Sandbox\saves`) |
+| Pantalla completa | F11 o Alt+Intro |
 | Depuración / ayuda | F3 / F1 |
 
 ## Lenguaje visual

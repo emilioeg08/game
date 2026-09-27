@@ -292,7 +292,8 @@ solo como referencia conceptual: la interfaz, los nombres y los assets serán or
    contención.
 8. **Carga sintética poco representativa.** La IA, los sensores y la política reales tendrán otros
    patrones de coste.
-9. **Plataformas.** El cliente gráfico solo está verificado en Windows/MSVC. El motor, la simulación, el
+9. **Plataformas.** Windows x64 es la plataforma de lanzamiento (Steam, ADR-034): la CI compila y prueba
+   ahí con MSVC en cada push, y arranca el paquete. El cliente gráfico solo está verificado en Windows. El motor, la simulación, el
    headless y los tests también compilan sin avisos y pasan en Linux con GCC 13 y Clang 18 (desde M3.5), y
    las trayectorias medidas coinciden con las de Windows. La igualdad entre plataformas no está garantizada
    (§11): es una observación, no un contrato.

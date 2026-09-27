@@ -70,6 +70,18 @@ python -m pip install -r tools/requirements-build.txt
 Presets: `debug` (sin optimizar, con asserts), `release` (optimizado, para benchmarks) y `profile`
 (optimizado con asserts e información de depuración). Los binarios quedan en `build/<preset>/bin/`.
 
+## Publicar en Windows (Steam)
+
+```powershell
+./scripts/package.ps1                     # release + tests + dist/GalaxyEngine (el depot) + zip + prueba de humo
+./scripts/steam-upload.ps1 -AppId <app> -DepotId <app+1> -Username <cuenta> -Branch beta
+```
+
+El jugador recibe un `gx_game.exe` sin consola y sin dependencias (CRT estático) y las licencias de SDL3 y
+Dear ImGui. Sus partidas y su log van a `%APPDATA%\GalaxyEngine\Sandbox`. La CI de GitHub Actions compila y
+prueba en Windows (MSVC) en cada push. Guía completa, y lo que falta para la tienda, en
+[docs/STEAM.md](docs/STEAM.md).
+
 ## Jugar
 
 ```powershell
@@ -80,7 +92,7 @@ Presets: `debug` (sin optimizar, con asserts), `release` (optimizado, para bench
 Controles: rueda = zoom · arrastrar = mover · clic = seleccionar · **clic derecho = ir allí** ·
 WASD = empuje manual · X = frenar · E = atacar el contacto seleccionado · C = alto el fuego · B = abordar · K = contratos ·
 R/T = radar/transpondedor · ventana Mercado al atracar · Espacio = pausa · 1/2/3 = ×1 (tiempo real)/×3/×10 · H/F = seguir ·
-F5/F9 = guardar/cargar · F3 = depuración · F1 = ayuda. La primera configuración descarga SDL3 y Dear ImGui
+F5/F9 = guardar/cargar · F11 = pantalla completa · F3 = depuración · F1 = ayuda. La primera configuración descarga SDL3 y Dear ImGui
 (versiones fijadas); `-DGX_BUILD_CLIENT=OFF` compila sin el cliente.
 
 Modo captura para comprobaciones automáticas:
@@ -136,5 +148,6 @@ cmake/ scripts/ tools/
   combate, economía, NPC, controles).
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md): capas, tiempo, pipeline, presentación, threading,
   entidades, eventos, comandos, persistencia, determinismo, LOD, referencias, contradicciones y riesgos.
-- [docs/DECISIONS.md](docs/DECISIONS.md): registro de decisiones (ADR-001 a ADR-032).
+- [docs/DECISIONS.md](docs/DECISIONS.md): registro de decisiones (ADR-001 a ADR-034).
 - [docs/BENCHMARKS.md](docs/BENCHMARKS.md): método y resultados medidos por hito.
+- [docs/STEAM.md](docs/STEAM.md): empaquetado para Windows, subida a Steam y lo que falta para la tienda.
