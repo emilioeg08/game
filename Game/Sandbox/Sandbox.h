@@ -6,6 +6,7 @@
 #include "Engine/Time/SimTime.h"
 #include "Game/Sandbox/Contracts.h"
 #include "Simulation/Economy/Economy.h"
+#include "Simulation/Economy/Finance.h"
 #include "Simulation/Kernel/SystemScheduler.h"
 #include "Simulation/World/EntityRegistry.h"
 #include "Space/Combat/Combat.h"
@@ -51,6 +52,15 @@ struct SandboxConfig {
     SimDuration authorityReview = SimDuration::minutes(2);
     // Traders take supply contracts too, competing with the player (ADR-032). Off: only the player does.
     bool tradersTakeContracts = true;
+    // Ships are bought with savings and bank credit, and insured by the traders' mutual (ADR-033). Off: lost
+    // or bankrupt traders are replaced for free, with fresh capital, up to `haulers` (the M3.4 behaviour).
+    bool finance = true;
+    // Most traders the system's business can grow to (0: twice `haulers`). Only with `finance`.
+    u32 maxHaulers = 0;
+
+    [[nodiscard]] u32 fleetCap() const {
+        return finance ? (maxHaulers > 0 ? maxHaulers : 2 * haulers) : haulers;
+    }
 };
 
 // Player input. Validated by the handler (never trusted).
@@ -140,6 +150,42 @@ struct HaulerBrain {
         ar.io("lastPort", lastPort);
         ar.io("trips", trips);
         ar.io("retiring", retiring);
+    }
+};
+
+// A trader's books (ADR-033): what it owes the bank, what it saves there and what its hull is insured for.
+// Earnings are measured against `lastWorth`, its net worth after the previous finance review.
+struct TraderFinance {
+    i64 debt = 0;
+    i64 instalment = 0; // principal due every minute
+    i64 deposit = 0;
+    i64 hullValue = 0;
+    i64 lastWorth = 0;
+
+    template <typename Archive>
+    void io(Archive& ar) {
+        ar.io("debt", debt);
+        ar.io("instalment", instalment);
+        ar.io("deposit", deposit);
+        ar.io("hullValue", hullValue);
+        ar.io("lastWorth", lastWorth);
+    }
+};
+
+// An owner-operator who lost its ship (destroyed, with an insurance payout) and wants another. Its equity
+// waits as a deposit at the bank until the bank finances the rest of a hull, or its patience runs out.
+struct ShipBuyer {
+    std::string name;
+    i64 equity = 0;
+    SimTime readyAt;
+    SimTime giveUpAt;
+
+    template <typename Archive>
+    void io(Archive& ar) {
+        ar.io("name", name);
+        ar.io("equity", equity);
+        ar.io("readyAt", readyAt);
+        ar.io("giveUpAt", giveUpAt);
     }
 };
 
@@ -237,6 +283,18 @@ struct SandboxStats {
     u64 contractsCancelled = 0;
     i64 contractRewardsPaid = 0;
     u64 contractsCompletedByTraders = 0;
+    // Finance (ADR-033).
+    u64 shipsBought = 0;
+    u64 shipsByReturningOwners = 0; // rebuilt with an insurance payout
+    u64 shipsByExpansion = 0;       // bought by a trader out of its savings
+    u64 shipsByOutsiders = 0;       // newcomers with outside savings and a loan
+    u64 repossessions = 0;
+    u64 ownersRetired = 0; // left the system with what was left of their equity
+    u64 peakHaulers = 0;
+    i64 capitalIn = 0;  // outsiders' savings brought into the system
+    i64 capitalOut = 0; // equity taken out by owners who left
+    i64 shipyardPaid = 0;
+    i64 premiumsPaid = 0;
 
     template <typename Archive>
     void io(Archive& ar) {
@@ -276,6 +334,17 @@ struct SandboxStats {
         ar.io("contractsCancelled", contractsCancelled);
         ar.io("contractRewardsPaid", contractRewardsPaid);
         ar.io("contractsCompletedByTraders", contractsCompletedByTraders);
+        ar.io("shipsBought", shipsBought);
+        ar.io("shipsByReturningOwners", shipsByReturningOwners);
+        ar.io("shipsByExpansion", shipsByExpansion);
+        ar.io("shipsByOutsiders", shipsByOutsiders);
+        ar.io("repossessions", repossessions);
+        ar.io("ownersRetired", ownersRetired);
+        ar.io("peakHaulers", peakHaulers);
+        ar.io("capitalIn", capitalIn);
+        ar.io("capitalOut", capitalOut);
+        ar.io("shipyardPaid", shipyardPaid);
+        ar.io("premiumsPaid", premiumsPaid);
     }
 };
 
@@ -358,13 +427,27 @@ public:
     [[nodiscard]] const std::vector<Contract>& contracts() const { return m_contracts; }
     // One line for the UI and the journal: "20 t de Agua a Arenmir II", "abatir al pirata ...".
     [[nodiscard]] std::string describe(const Contract& contract) const;
+    // The system's bank and the traders' mutual insurer (ADR-033), and owners waiting for a new ship.
+    [[nodiscard]] const BankLedger& bank() const { return m_bank; }
+    [[nodiscard]] const MutualLedger& mutual() const { return m_mutual; }
+    [[nodiscard]] const std::vector<ShipBuyer>& buyers() const { return m_buyers; }
+    // The mutual's current hull premium per ship-hour.
+    [[nodiscard]] f64 premiumPerHour() const;
+    // What the bank expects one more trader to earn per hour, after taxes, repairs and wages and before
+    // premiums and debt: what traders earned lately, diluted by the ships added since.
+    [[nodiscard]] f64 expectedEarningsPerHour() const;
+    // A trader's net worth: credits on board, savings and cargo (at base prices), less its debt.
+    [[nodiscard]] i64 traderWorth(const World& world, EntityId ship) const;
     [[nodiscard]] const SandboxConfig& config() const { return m_config; }
     [[nodiscard]] bool tactical() const;
 
 private:
     EntityId spawnShip(World& world, SimTime now, Rng& rng, std::string name, u32 faction, u32 shipClass,
                        EntityId port);
-    EntityId spawnHauler(World& world, SimTime now, Rng& rng, u32 serial);
+    // At `port` (a random one if invalid), named after `serial` unless `name` is given.
+    EntityId spawnHauler(World& world, SimTime now, Rng& rng, u32 serial, std::string name = {},
+                         EntityId port = {});
+    [[nodiscard]] std::string haulerName(Rng& rng, u32 serial) const;
     EntityId spawnPirate(World& world, SimTime now, Rng& rng, u32 serial);
     void setupMarkets(World& world);
     void planHaulerTrip(World& world, EntityId ship, HaulerBrain& brain, ShipControl& control, SimTime now,
@@ -382,6 +465,24 @@ private:
     // A wanted pirate was destroyed or captured: completes (by the player, accepted) or cancels its bounties.
     void settleBounty(EntityId pirate, bool byPlayer, SimTime now);
     void updatePayroll(const TickContext& context);
+    // Premiums, loans, savings, the bank's and the mutual's experience and the purchase of new ships, every
+    // minute (ADR-033).
+    void updateFinance(const TickContext& context);
+    void reviewShipPurchase(World& world, SimTime now);
+    // A trader leaves the business (ship lost or repossessed): its credits on board, its savings and
+    // `proceeds` (insurance claim or hull sale) pay its debt first; returns what is left, as a deposit.
+    i64 settleEstate(World& world, EntityId ship, i64 proceeds);
+    // A trader's ship was destroyed or captured: the mutual pays its hull and the owner may buy another.
+    void onTraderLost(World& world, EntityId ship, SimTime now);
+    // A bankrupt trader's ship is sold by the bank.
+    void repossess(World& world, EntityId ship, SimTime now);
+    // Buys a hull for an owner with `equity` (credits in hand): the bank lends what the down payment does
+    // not cover. Returns the new ship.
+    EntityId buyHauler(World& world, SimTime now, std::string name, i64 equity, i64 loan);
+    [[nodiscard]] i64 debtServicePerHour(i64 loan) const;
+    // Before a trader plans a trip: its savings, and credit against its hull if it is short of working
+    // capital.
+    void drawFunds(World& world, EntityId ship, Wallet& wallet);
     // Whether `faction`'s sensor picture has `ship` identified (a witness that can name it).
     [[nodiscard]] bool witnessedBy(u32 faction, EntityId ship) const;
     EntityId spawnPatrol(World& world, SimTime now, Rng& rng, u32 serial);
@@ -434,6 +535,14 @@ private:
     std::vector<DistressCall> m_distress;
     std::vector<Contract> m_contracts;
     u32 m_nextContractId = 1;
+    BankLedger m_bank;
+    MutualLedger m_mutual;
+    ExperienceRate m_earnings; // traders' operating earnings per ship-hour, as the bank sees them
+    ExperienceRate m_fleet;    // ship-hours per hour over the same window: the fleet that earned them
+    std::vector<ShipBuyer> m_buyers;
+    SimTime m_nextNewcomer;       // outsiders are financed one at a time
+    f64 m_announcedPremium = 0.0; // last premium in the news
+    bool m_creditOpen = true;     // last credit conditions in the news
     PriceBook m_playerPrices;
     PriceBook m_traderPrices;
     std::vector<PortDanger> m_danger;

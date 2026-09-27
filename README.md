@@ -3,7 +3,7 @@
 Motor propio en C++20 para un sandbox 4X de simulación galáctica persistente: la galaxia existe, cambia y
 produce consecuencias aunque el jugador no la esté mirando.
 
-**Estado: M3.4 (Los comerciantes también aceptan contratos).** El primer vertical slice está completo. Hay un juego en
+**Estado: M3.5 (El dinero tiene origen: crédito, seguros e inversión).** El primer vertical slice está completo. Hay un juego en
 tiempo real (×1, ×3, ×10):
 
 - un sistema estelar generado con órbitas keplerianas;
@@ -34,6 +34,12 @@ persiguen piratas y van a por ti si eres hostil. Con ellas se pierden un tercio 
 Hay contratos que nacen de lo que pasa: suministros urgentes a puertos con escasez real (los paga el
 puerto) y recompensas por piratas identificados (las paga la Autoridad). Se aceptan en las estaciones (K),
 y los cargueros compiten contigo por los suministros.
+
+El dinero tiene origen. Los cargueros ya no reaparecen gratis: se compran con ahorros y con crédito del
+banco del sistema, que presta si el negocio cubre la deuda y guarda los ahorros de quien prospera. La Mutua
+de Fletadores asegura los cascos y las averías con una prima que sale de las pérdidas reales. En paz la
+flota crece y la escasez baja; con piratas el seguro se encarece, los comerciantes se descapitalizan y la
+escasez se dispara. Las patrullas abaratan el seguro.
 
 Por debajo están el kernel de M1 (entidades, eventos, comandos, save/load, replay, LOD por frecuencia) y la
 fase 0. El diseño es provisional
@@ -103,6 +109,7 @@ con `gx_game.exe --seed 1 --fly-to 1 --prerun-hours 0.0745 --engage-nearest --zo
 ./build/release/bin/gx_headless.exe --sandbox --minutes 20 --seed 1 --fly-to 1 --journal
 ./build/release/bin/gx_headless.exe --sandbox --minutes 600 --pirates 0 --markets   # economía por puerto
 ./build/release/bin/gx_headless.exe --sandbox --minutes 600 --patrols 0 --dump      # sin patrullas; estado final
+./build/release/bin/gx_headless.exe --sandbox --minutes 480 --no-finance            # M3.4: reemplazos gratis
 
 ./build/release/bin/gx_headless.exe --help
 ```

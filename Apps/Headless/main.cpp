@@ -60,6 +60,8 @@ struct Options {
     u32 pirates = 3;
     u32 patrols = 3;
     bool traderContracts = true;
+    bool finance = true;
+    u32 maxHaulers = 0;
     i32 flyTo = -1;       // order the player's ship to this port at the start
     bool journal = false; // print the game journal at the end
     bool markets = false; // print every port's market at the end
@@ -88,6 +90,8 @@ void printUsage() {
                 "                      --haulers, --pirates): combat and traffic statistics\n"
                 "  --patrols <n>       sandbox: most patrols the Authority may keep (default 3)\n"
                 "  --no-trader-contracts  sandbox: only the player takes supply contracts\n"
+                "  --no-finance        sandbox: losses replaced for free, no bank or insurance (M3.4)\n"
+                "  --max-haulers <n>   sandbox: most traders the business can grow to (default 2x)\n"
                 "  --fly-to <i>        sandbox: send the player's ship to port i at the start\n"
                 "  --journal           sandbox: print the game journal at the end\n"
                 "  --markets           sandbox: print every port's market at the end\n"
@@ -154,6 +158,10 @@ int parseOptions(int argc, char** argv, Options& options) {
             ok = parseNumber(value(), options.pirates);
         } else if (arg == "--no-trader-contracts") {
             options.traderContracts = false;
+        } else if (arg == "--no-finance") {
+            options.finance = false;
+        } else if (arg == "--max-haulers") {
+            ok = parseNumber(value(), options.maxHaulers);
         } else if (arg == "--patrols") {
             ok = parseNumber(value(), options.patrols);
         } else if (arg == "--fly-to") {
@@ -377,6 +385,39 @@ void printEconomy(const Simulation& simulation, const Sandbox& sandbox, bool per
         static_cast<unsigned long long>(stats.contractsCancelled),
         static_cast<usize>(std::count_if(sandbox.contracts().begin(), sandbox.contracts().end(),
                                          [](const Contract& c) { return c.state == ContractState::Open; })));
+    if (sandbox.config().finance) {
+        const BankLedger& bank = sandbox.bank();
+        const MutualLedger& mutual = sandbox.mutual();
+        std::printf(
+            "bank: equity %lld (cash %lld, loans %lld, deposits %lld) | interest %lld earned, %lld paid "
+            "| %llu loans, %llu defaults, %lld written off\n",
+            static_cast<long long>(bank.equity()), static_cast<long long>(bank.cash),
+            static_cast<long long>(bank.loans), static_cast<long long>(bank.deposits),
+            static_cast<long long>(bank.interestEarned), static_cast<long long>(bank.interestPaid),
+            static_cast<unsigned long long>(bank.loansGranted),
+            static_cast<unsigned long long>(bank.defaults), static_cast<long long>(bank.writtenOff));
+        std::printf(
+            "mutual: fund %lld | premiums %lld, claims %lld (repairs %lld, %llu hulls, %llu short) | "
+            "premium %.0f cr/h, %.3f losses per ship-hour | a new trader expected to earn %.0f cr/h\n",
+            static_cast<long long>(mutual.fund), static_cast<long long>(mutual.premiums),
+            static_cast<long long>(mutual.claimsPaid), static_cast<long long>(mutual.repairsPaid),
+            static_cast<unsigned long long>(mutual.claims),
+            static_cast<unsigned long long>(mutual.claimsShort), sandbox.premiumPerHour(),
+            mutual.losses.estimate(content::kLossRatePrior, content::kLossRatePriorHours),
+            sandbox.expectedEarningsPerHour());
+        std::printf(
+            "fleet: %zu haulers (peak %llu) | %llu ships bought: %llu by returning owners, %llu by "
+            "expansion, %llu by newcomers | %llu repossessed, %llu owners left, %zu waiting | capital "
+            "in %lld, out %lld\n",
+            world.components<HaulerBrain>().size(), static_cast<unsigned long long>(stats.peakHaulers),
+            static_cast<unsigned long long>(stats.shipsBought),
+            static_cast<unsigned long long>(stats.shipsByReturningOwners),
+            static_cast<unsigned long long>(stats.shipsByExpansion),
+            static_cast<unsigned long long>(stats.shipsByOutsiders),
+            static_cast<unsigned long long>(stats.repossessions),
+            static_cast<unsigned long long>(stats.ownersRetired), sandbox.buyers().size(),
+            static_cast<long long>(stats.capitalIn), static_cast<long long>(stats.capitalOut));
+    }
     if (!perPort) {
         return;
     }
@@ -404,6 +445,8 @@ int runSandbox(const Options& options) {
     config.pirates = options.pirates;
     config.maxPatrols = options.patrols;
     config.tradersTakeContracts = options.traderContracts;
+    config.finance = options.finance;
+    config.maxHaulers = options.maxHaulers;
     Sandbox sandbox(config);
     Simulation simulation(Simulation::Config{.seed = config.seed}, jobs);
     sandbox.install(simulation);
@@ -449,6 +492,16 @@ int runSandbox(const Options& options) {
             world.components<PirateBrain>().size(), stats.hunts, combat.shotsFired, combat.hits,
             stats.haulersLost, stats.piratesLost, stats.piratesLeft, stats.playerDeaths,
             (simulation.now() - SimTime::epoch()).toSeconds() / std::max(wall.elapsedSeconds(), 1e-9));
+        GX_LOG_INFO(kChannel, "    trade | delivered {:>6} t | loads {:>4} | bankruptcies {:>3}",
+                    stats.tonnesDelivered, stats.haulerTrades, stats.bankruptcies);
+        if (config.finance) {
+            GX_LOG_INFO(
+                kChannel,
+                "    finance | delivered {:>6} t | earnings {:>5.0f} cr/h, premium {:>4.0f} cr/h | bank "
+                "cash {:>6} loans {:>6} deposits {:>6} | mutual {:>6}",
+                stats.tonnesDelivered, sandbox.expectedEarningsPerHour(), sandbox.premiumPerHour(),
+                sandbox.bank().cash, sandbox.bank().loans, sandbox.bank().deposits, sandbox.mutual().fund);
+        }
     }
     const World& world = simulation.world();
     const ComponentStore<PirateBrain>& pirates = world.components<PirateBrain>();
@@ -503,14 +556,20 @@ int runSandbox(const Options& options) {
             const ShipModules& modules = dumped.components<ShipModules>().get(ship);
             const Wallet* wallet = dumped.components<Wallet>().tryGet(ship);
             const CargoHold& hold = dumped.components<CargoHold>().get(ship);
+            const TraderFinance* books = dumped.components<TraderFinance>().tryGet(ship);
             std::printf("  %-14s %-10s %-8s %-10s arrived %d target %-22s speed %8.1f km/s structure %3.0f%% "
                         "power %d "
-                        "credits %7lld cargo %3u t\n",
+                        "credits %7lld cargo %3u t",
                         nameOf(ship).c_str(), state, toString(control.mode), toString(control.phase),
                         control.arrived ? 1 : 0, nameOf(control.target).c_str(),
                         length(dumped.components<Kinematics>().get(ship).velocity) / 1e3,
                         structureOf(modules)->fraction() * 100.0, hasPower(modules) ? 1 : 0,
                         static_cast<long long>(wallet != nullptr ? wallet->credits : 0), hold.used());
+            if (books != nullptr) {
+                std::printf(" deposit %7lld debt %5lld", static_cast<long long>(books->deposit),
+                            static_cast<long long>(books->debt));
+            }
+            std::printf("\n");
         };
         const ComponentStore<HaulerBrain>& haulerBrains = dumped.components<HaulerBrain>();
         for (usize i = 0; i < haulerBrains.size(); ++i) {

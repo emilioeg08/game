@@ -465,3 +465,52 @@ sustituya y explique por qué.
   Las cuatro semillas van en la misma dirección. El efecto es real, no ruido de trayectoria.
 - **Consecuencia para el jugador:** los suministros fáciles desaparecen antes del tablón. La ventaja del
   jugador es su nave rápida para los urgentes y lejanos, y aceptar primero en la estación.
+
+## ADR-033 — Finanzas: los cascos se compran, las pérdidas se aseguran y el crédito sigue al negocio
+
+- **Contexto:** prompt §18 (crédito, deuda, seguros, inversión) y §30 (causalidad). Hasta M3.4, un carguero
+  perdido o quebrado reaparecía al minuto con 3.000 cr salidos de la nada. Medido: con 3 piratas las
+  entregas eran *mayores* en algunas semillas que sin ellos (el capital regalado enmascaraba el daño),
+  mientras un comerciante acumulaba 56.000 cr que no tenían ningún efecto.
+- **Decisión:**
+  - Primitivas genéricas en `Simulation/Economy/Finance.h`, sin dependencia espacial: `BankLedger` (caja,
+    préstamos, depósitos, capital; identidad capital + intereses cobrados − pagados − fallidos),
+    `MutualLedger` (fondo = capital + primas − siniestros) y `ExperienceRate` (estimador de credibilidad
+    con olvido exponencial). Cada operación mueve los dos lados; los saldos individuales viven en
+    `TraderFinance` (componente de cada carguero) y en `ShipBuyer` (armadores sin nave).
+  - `Game.Finance` (cada minuto, en `EventResolution` porque compra naves): primas, intereses y cuotas,
+    barrido de excedentes (amortización anticipada y depósito), experiencia del banco y de la Mutua, y una
+    compra de casco como mucho. Los armadores que perdieron su nave tienen plaza reservada.
+  - Crédito contra el casco al planear un viaje (LTV del 75 %): iliquidez no es insolvencia. En la quiebra el
+    banco cobra primero de la venta del casco (su garantía).
+  - La regla de crédito es un DSCR estándar: (ganancia esperada − prima) ≥ 1,25 × (cuota + intereses).
+  - `SandboxConfig::finance` (y `gx_headless --no-finance`) reproduce M3.4 para comparar: mismas
+    estadísticas en la misma semilla (el hash difiere solo porque el guardado lleva los libros, vacíos).
+- **Mediciones que cambiaron el diseño:**
+  1. **Estimador de ganancias.** Con la media por nave-hora, el banco prestaba con datos de cuando había
+     menos barcos: de 7 a 34 cargueros y de vuelta a 16, con 18 embargos en 16 h. Repartir el beneficio
+     total entre n+1 (comercio saturado) hundía las flotas pequeñas: en la semilla 12345 la flota bajó de 12
+     a 6 y no se repuso en 4 h, porque con pocos barcos el beneficio total también cae. Se quedó el híbrido:
+     media por nave-hora × min(1, flota del periodo / (flota + 1)). Con él, 16–22 cargueros en 16 h sin
+     tope artificial.
+  2. **Averías.** Con la prima pagando solo cascos perdidos, los cargueros dañados no podían pagar la
+     reparación y volvían a salir con el 12–40 % de estructura. La semilla 99 entregaba menos de la mitad
+     con la flota llena. Ahora la Mutua cubre las reparaciones y las cuenta en la siniestralidad.
+  3. **Liquidez.** Con 3.000 cr y sin crédito, la prima y los salarios de los primeros viajes largos
+     hacían quebrar a comerciantes con un casco de 6.000 cr y poca deuda. De ahí la línea contra el casco.
+  4. **Depósitos.** Con tipo fijo, en la semilla 99 los depósitos subían a 171.000 cr al 0,5 %/h con
+     2.000 cr prestados: el banco pagaba más de lo que ingresaba. Ahora el tipo de depósito es a lo sumo la
+     mitad de lo que rinden los préstamos por crédito depositado.
+  5. **DSCR.** La primera regla, ganancia ≥ 1,25 × (prima + deuda), exigía a un armador sin deuda ganar un
+     25 % más que la prima. El DSCR estándar pone el margen sobre la deuda, no sobre la prima.
+- **Medido** (8 h, 4 semillas × 3 trayectorias; tablas en `docs/DESIGN.md` y `docs/BENCHMARKS.md`):
+  - en paz, la flota crece a ~20 cargueros: +15 % de entregas y −33 % de escasez;
+  - con 6 piratas, −42 % de entregas (−17 % sin finanzas), en las 12 trayectorias;
+  - las patrullas bajan la prima un 15 %.
+  - Sin coste de simulación apreciable a igual flota.
+- **Consecuencias:**
+  - La piratería por defecto (3 piratas, ~9 % de pérdidas por nave-hora) es una zona de guerra, y ahora se
+    nota. Las decisiones de equilibrio se toman con varias semillas y trayectorias: el crédito amplifica la
+    suerte (la semilla 99 da entre 3.900 y 7.600 t según perturbaciones mínimas).
+  - Pendiente: crédito y seguro para el jugador, seguro de la carga y piratas con economía propia (siguen
+    reapareciendo gratis).

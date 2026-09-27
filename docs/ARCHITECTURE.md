@@ -62,7 +62,7 @@ Reglas:
 | `Simulation/World` | `EntityId` generacional, `EntityRegistry`, `ComponentStore<T>` (sparse set), `World` |
 | `Simulation/Events` | `EventChannel<T>`, `EventBus` (emisión serie y paralela, despacho con cascadas) |
 | `Simulation/Commands` | `CommandQueue` (entrada externa serializada, grabación para replay) |
-| `Simulation/Economy` | mercados (existencias, precios, recetas, demandas), bodegas, carteras, operaciones tonelada a tonelada, libros de precios y `EconomySystem` paralelo |
+| `Simulation/Economy` | mercados (existencias, precios, recetas, demandas), bodegas, carteras, operaciones tonelada a tonelada, libros de precios y `EconomySystem` paralelo; finanzas (`Finance.h`): libros de banco y mutua con identidades contables, y estimadores de experiencia (ADR-033) |
 | `Space/Orbits` | órbitas keplerianas analíticas (solver de Kepler con Newton protegido) |
 | `Space/Bodies` | `CelestialBody`, `OrbitsParent`, estado absoluto por la cadena de padres |
 | `Space/Ships` | componentes de nave, autopiloto (`steer`), `FlightSystem` (dos pases, eventos `ShipArrived`), módulos y daño (`ShipModules`, `applyDamage`, `applyModuleEffects`) |
@@ -292,7 +292,10 @@ solo como referencia conceptual: la interfaz, los nombres y los assets serán or
    contención.
 8. **Carga sintética poco representativa.** La IA, los sensores y la política reales tendrán otros
    patrones de coste.
-9. **Solo verificado en Windows/MSVC.**
+9. **Plataformas.** El cliente gráfico solo está verificado en Windows/MSVC. El motor, la simulación, el
+   headless y los tests también compilan sin avisos y pasan en Linux con GCC 13 y Clang 18 (desde M3.5), y
+   las trayectorias medidas coinciden con las de Windows. La igualdad entre plataformas no está garantizada
+   (§11): es una observación, no un contrato.
 10. **Escala en tiempo real (ADR-021).** Con ×10 como máximo, el cliente va sobrado de CPU, pero la
     economía, la política y la sucesión deberán diseñarse para avanzar a ritmo real. El universo lejano
     (otros sistemas) tendrá que simularse de forma agregada (LOD 0–1) para no pagar su coste en tiempo real.

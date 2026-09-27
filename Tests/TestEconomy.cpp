@@ -2,6 +2,7 @@
 
 #include "Engine/Jobs/JobSystem.h"
 #include "Simulation/Economy/Economy.h"
+#include "Simulation/Economy/Finance.h"
 #include "Simulation/Kernel/Simulation.h"
 
 #include <cmath>
@@ -160,4 +161,70 @@ GX_TEST(Economy, ParallelMarketsAreDeterministic) {
     const u64 reference = run(0);
     GX_EXPECT_EQ(run(3), reference);
     GX_EXPECT_EQ(run(7), reference);
+}
+
+GX_TEST(Economy, ExperienceRateShrinksTowardsThePriorAndForgets) {
+    ExperienceRate rate;
+    GX_EXPECT_NEAR(rate.estimate(0.05, 40.0), 0.05, 1e-12); // no evidence: the prior
+    rate.add(6.0, 60.0);                                    // 6 losses in 60 ship-hours: 0.1 per hour
+    GX_EXPECT_NEAR(rate.estimate(0.05, 40.0), (6.0 + 2.0) / 100.0, 1e-12);
+    GX_EXPECT_NEAR(rate.estimate(0.05, 0.0), 0.1, 1e-12); // no prior: the evidence alone
+    rate.decay(7'200.0, 7'200.0);                         // one half-life: half the weight, same ratio
+    GX_EXPECT_NEAR(rate.observed, 3.0, 1e-12);
+    GX_EXPECT_NEAR(rate.exposure, 30.0, 1e-12);
+    GX_EXPECT_NEAR(rate.estimate(0.05, 40.0), (3.0 + 2.0) / 70.0, 1e-12); // back towards the prior
+}
+
+GX_TEST(Economy, BankLedgerBalancesThroughEveryOperation) {
+    BankLedger bank;
+    bank.open(10'000);
+    GX_EXPECT(bank.balanced());
+    GX_EXPECT(bank.canLend(8'000, 0.2));
+    bank.lend(8'000);
+    bank.deposit(5'000);
+    GX_EXPECT(bank.canLend(6'000, 0.2)); // 7,000 cash, 1,000 kept against deposits
+    GX_EXPECT(!bank.canLend(6'001, 0.2));
+    GX_EXPECT(bank.canLend(7'000, 0.0));
+    bank.receiveInterest(160);
+    bank.creditInterest(25);
+    bank.repay(3'000);
+    bank.offset(1'000); // a borrower's savings pay its own debt
+    bank.withdraw(500);
+    bank.writeOff(1'500);
+    GX_EXPECT(bank.balanced());
+    GX_EXPECT_EQ(bank.loans, 8'000 - 3'000 - 1'000 - 1'500);
+    GX_EXPECT_EQ(bank.deposits, 5'000 + 25 - 1'000 - 500);
+    GX_EXPECT_EQ(bank.equity(), 10'000 + 160 - 25 - 1'500);
+    GX_EXPECT_EQ(bank.defaults, 1u);
+    GX_EXPECT_EQ(bank.loansGranted, 1u);
+}
+
+GX_TEST(Economy, DepositsEarnOnlyWhatLoansPayFor) {
+    BankLedger bank;
+    bank.open(10'000);
+    bank.deposit(20'000);
+    GX_EXPECT_NEAR(bank.depositRate(0.02, 0.005, 0.5), 0.0, 1e-12); // nobody borrows the savings
+    bank.lend(10'000);
+    GX_EXPECT_NEAR(bank.depositRate(0.02, 0.005, 0.5), 0.02 * 0.5 * 0.5, 1e-12);
+    bank.lend(15'000);
+    GX_EXPECT_NEAR(bank.depositRate(0.02, 0.005, 0.5), 0.005, 1e-12); // capped
+}
+
+GX_TEST(Economy, MutualPaysWhatItHasAndPricesItsExperience) {
+    MutualLedger mutual;
+    mutual.open(5'000);
+    mutual.collect(1'000, 10.0);
+    GX_EXPECT_NEAR(mutual.premiumPerHour(500.0, 10.0, 0.25), 250.0 * 1.25,
+                   1e-9);                   // 10 h clean: half the prior
+    GX_EXPECT(mutual.cover(2'000));         // a repair
+    GX_EXPECT_EQ(mutual.pay(6'000), 4'000); // a total loss larger than the fund: paid in part
+    GX_EXPECT_EQ(mutual.fund, 0);
+    GX_EXPECT(!mutual.cover(100)); // an empty fund covers no repairs
+    GX_EXPECT(mutual.balanced());
+    GX_EXPECT_EQ(mutual.claims, 1u);
+    GX_EXPECT_EQ(mutual.claimsShort, 1u);
+    GX_EXPECT_EQ(mutual.repairsPaid, 2'000);
+    // The risk counts what was lost, paid or not: 2,000 + 6,000 + 100 over 10 insured hours.
+    GX_EXPECT_NEAR(mutual.premiumPerHour(500.0, 10.0, 0.0), (8'100.0 + 5'000.0) / 20.0, 1e-9);
+    GX_EXPECT_NEAR(mutual.losses.estimate(0.0, 0.0), 0.1, 1e-12);
 }

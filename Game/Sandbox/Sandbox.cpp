@@ -25,6 +25,7 @@ constexpr u64 kDwellStream = fnv1a64("sandbox.hauler.dwell");
 constexpr u64 kAmbushStream = fnv1a64("sandbox.pirate.ambush");
 constexpr u64 kPatrolStream = fnv1a64("sandbox.patrol.commission");
 constexpr u64 kBeatStream = fnv1a64("sandbox.patrol.beat");
+constexpr u64 kFinanceStream = fnv1a64("sandbox.finance.initial");
 constexpr SimDuration kPatrolChaseTimeout = SimDuration::minutes(5);
 constexpr SimDuration kAmbushTime = SimDuration::minutes(4); // raiders move to another ambush point
 constexpr SimDuration kHitJournalGap = SimDuration::seconds(10);
@@ -114,6 +115,7 @@ void Sandbox::install(Simulation& simulation) {
     world.registerComponent<HaulerBrain>("Game.HaulerBrain");
     world.registerComponent<PirateBrain>("Game.PirateBrain");
     world.registerComponent<PatrolBrain>("Game.PatrolBrain");
+    world.registerComponent<TraderFinance>("Game.TraderFinance");
 
     EventBus& events = simulation.events();
     events.channel<ShipArrived>().subscribe(
@@ -199,6 +201,14 @@ void Sandbox::install(Simulation& simulation) {
                           m_config.authorityReview,
                           {},
                           [this](const TickContext& context) { updateAuthority(context); }});
+    // Premiums, loans and savings, and the purchase of new ships (structural changes).
+    if (m_config.finance) {
+        simulation.addSystem({"Game.Finance",
+                              TickPhase::EventResolution,
+                              SimDuration::minutes(1),
+                              {},
+                              [this](const TickContext& context) { updateFinance(context); }});
+    }
 
     simulation.addStateBlock(
         "Game.Sandbox", [this](BinaryWriter& writer) { writeState(writer); },
@@ -220,6 +230,25 @@ void Sandbox::populate(Simulation& simulation) {
                          content::kShipClassCourier, m_home);
     for (u32 i = 0; i < m_config.haulers; ++i) {
         spawnHauler(world, now, rng, i);
+    }
+    if (m_config.finance) {
+        // The bank opens with its capital, part of it already lent: every hull still owes some of its price
+        // (bought at different times). A separate stream: the ships are the same with or without finance.
+        m_bank.open(content::kBankCapital);
+        m_mutual.open(content::kMutualCapital);
+        Rng finance = Rng::forStream(m_config.seed, kFinanceStream);
+        for (const EntityId ship : world.components<HaulerBrain>().entities()) {
+            const auto maxDebt =
+                static_cast<u32>(content::kInitialDebtShare * static_cast<f64>(content::kHaulerHullPrice));
+            TraderFinance& books = world.components<TraderFinance>().get(ship);
+            books.debt = finance.uniformU32(maxDebt + 1);
+            books.instalment =
+                books.debt > 0
+                    ? std::max<i64>(1, books.debt / static_cast<i64>(content::kLoanTermHours * 60.0))
+                    : 0;
+            m_bank.lend(books.debt);
+            books.lastWorth = traderWorth(world, ship);
+        }
     }
     for (u32 i = 0; i < m_config.pirates; ++i) {
         spawnPirate(world, now, rng, i);
@@ -282,6 +311,9 @@ EntityId Sandbox::spawnShip(World& world, SimTime now, Rng& rng, std::string nam
         world.components<Wallet>().add(ship, {content::kPlayerStartCredits});
     } else if (faction == content::kFactionIndependent) {
         world.components<Wallet>().add(ship, {content::kHaulerStartCredits});
+        if (m_config.finance) {
+            world.components<TraderFinance>().add(ship, {.hullValue = content::kHaulerHullPrice});
+        }
     }
     return ship;
 }
@@ -392,6 +424,7 @@ void Sandbox::planHaulerTrip(World& world, EntityId ship, HaulerBrain& brain, Sh
                              SimTime now, Rng& rng) {
     CargoHold& hold = world.components<CargoHold>().get(ship);
     Wallet& wallet = world.components<Wallet>().get(ship);
+    drawFunds(world, ship, wallet);
     if (wallet.credits < 0) {
         brain.retiring = true; // cannot pay the crew: sells up and leaves (Game.Upkeep)
         return;
@@ -632,10 +665,19 @@ void Sandbox::sellCargo(World& world, EntityId ship, EntityId port, SimTime now)
     m_traderPrices.observe(port, *market, m_economy.goods(), now);
 }
 
-EntityId Sandbox::spawnHauler(World& world, SimTime now, Rng& rng, u32 serial) {
-    const EntityId port = m_ports[rng.uniformU32(static_cast<u32>(m_ports.size()))];
-    std::string name = std::format("{}-{}", content::kHaulerNames[serial % content::kHaulerNames.size()],
-                                   10 + rng.uniformU32(90));
+std::string Sandbox::haulerName(Rng& rng, u32 serial) const {
+    return std::format("{}-{}", content::kHaulerNames[serial % content::kHaulerNames.size()],
+                       10 + rng.uniformU32(90));
+}
+
+EntityId Sandbox::spawnHauler(World& world, SimTime now, Rng& rng, u32 serial, std::string name,
+                              EntityId port) {
+    if (!port.isValid()) {
+        port = m_ports[rng.uniformU32(static_cast<u32>(m_ports.size()))];
+    }
+    if (name.empty()) {
+        name = haulerName(rng, serial);
+    }
     const EntityId ship = spawnShip(world, now, rng, std::move(name), content::kFactionIndependent,
                                     content::kShipClassHauler, port);
     const auto maxDwellMs = static_cast<u32>(m_config.maxDwell.count() / 1000);
@@ -887,7 +929,9 @@ void Sandbox::updateUpkeep(const TickContext& context) {
         const bool atStation = port != nullptr && port->kind == BodyKind::Station;
         const bool quiet = (now - modules.lastDamaged).toSeconds() >= content::kDamageControlDelay;
         if (atStation) {
-            // Station repairs are paid to the Authority, and refused to whoever it considers hostile.
+            // Station repairs are paid to the Authority, and refused to whoever it considers hostile. A
+            // trader's are claimed on its hull insurance (ADR-033); if the mutual cannot pay, the trader
+            // does.
             f64 points = 0.0;
             for (const ShipModule& module : modules.modules) {
                 points += std::clamp(module.maxHealth - module.health, 0.0,
@@ -898,10 +942,13 @@ void Sandbox::updateUpkeep(const TickContext& context) {
             }
             const i64 cost = std::llround(points * content::kRepairCostPerPoint);
             Wallet* wallet = world.components<Wallet>().tryGet(ship);
-            if ((ship == m_player && hostile()) || (wallet != nullptr && wallet->credits < cost)) {
+            const TraderFinance* insured = world.components<TraderFinance>().tryGet(ship);
+            if (insured != nullptr && insured->hullValue > 0 && m_mutual.cover(cost)) {
+                m_treasury += cost;
+                m_stats.repairFees += cost;
+            } else if ((ship == m_player && hostile()) || (wallet != nullptr && wallet->credits < cost)) {
                 continue;
-            }
-            if (wallet != nullptr) {
+            } else if (wallet != nullptr) {
                 wallet->credits -= cost;
                 m_treasury += cost;
                 m_stats.repairFees += cost;
@@ -959,6 +1006,7 @@ void Sandbox::updateUpkeep(const TickContext& context) {
         }
         addJournal(now, std::format("Noticias: {} quiebra y abandona el sistema.", nameOf(world, ship)),
                    JournalKind::News);
+        repossess(world, ship, now);
         world.destroyEntity(ship);
         ++m_stats.bankruptcies;
         m_nextHaulerSpawn = std::max(m_nextHaulerSpawn, now + m_config.haulerRespawnDelay);
@@ -984,7 +1032,9 @@ void Sandbox::updateUpkeep(const TickContext& context) {
         ++m_stats.spawns;
         addJournal(now, std::format("Una nave nueva te espera en {}.", nameOf(world, m_home)));
     }
-    if (world.components<HaulerBrain>().size() < m_config.haulers && now >= m_nextHaulerSpawn) {
+    // With finance, new traders buy their ships (Game.Finance); without it, they appear with fresh capital.
+    if (!m_config.finance && world.components<HaulerBrain>().size() < m_config.haulers &&
+        now >= m_nextHaulerSpawn) {
         spawnHauler(world, now, rng, static_cast<u32>(m_stats.spawns));
         ++m_stats.spawns;
         m_nextHaulerSpawn = now + m_config.haulerRespawnDelay;
@@ -1114,6 +1164,7 @@ void Sandbox::onShipDamaged(const ShipDamaged& event, const TickContext& context
 void Sandbox::onShipDestroyed(const ShipDestroyed& event, const TickContext& context) {
     const World& world = context.world;
     const SimTime now = context.now;
+    onTraderLost(context.world, event.ship, now); // the insurance pays before the ship leaves the World
     if (const CargoHold* hold = world.components<CargoHold>().tryGet(event.ship)) {
         m_stats.cargoLost.resize(std::max<usize>(m_stats.cargoLost.size(), content::kGoodCount), 0);
         for (const CargoItem& item : hold->items) {
@@ -1427,6 +1478,7 @@ void Sandbox::onBoardCommand(const BoardCommand& command, const TickContext& con
                            loot.empty() ? "no lleva carga" : "te llevas " + loot));
     ++m_stats.boardings;
     if (victimIdentity.faction == content::kFactionIndependent) {
+        onTraderLost(world, victim, context.now);       // a captured hull is a loss for the mutual too
         changeReputation(content::kReputationBoarding); // they always know who boarded them
         addJournal(context.now, std::format("Los comerciantes lo saben: reputación {:.0f}.", m_reputation));
         m_nextHaulerSpawn = std::max(m_nextHaulerSpawn, context.now + m_config.haulerRespawnDelay);
@@ -1789,6 +1841,14 @@ void Sandbox::writeState(BinaryWriter& writer) const {
     writer.io(m_distress);
     writer.io(m_contracts);
     writer.io(m_nextContractId);
+    writer.io(m_bank);
+    writer.io(m_mutual);
+    writer.io(m_earnings);
+    writer.io(m_fleet);
+    writer.io(m_buyers);
+    writer.io(m_nextNewcomer);
+    writer.io(m_announcedPremium);
+    writer.io(m_creditOpen);
     writer.io(m_playerPrices);
     writer.io(m_traderPrices);
     writer.io(m_danger);
@@ -1812,6 +1872,14 @@ void Sandbox::readState(BinaryReader& reader) {
     reader.io(m_distress);
     reader.io(m_contracts);
     reader.io(m_nextContractId);
+    reader.io(m_bank);
+    reader.io(m_mutual);
+    reader.io(m_earnings);
+    reader.io(m_fleet);
+    reader.io(m_buyers);
+    reader.io(m_nextNewcomer);
+    reader.io(m_announcedPremium);
+    reader.io(m_creditOpen);
     reader.io(m_playerPrices);
     reader.io(m_traderPrices);
     reader.io(m_danger);

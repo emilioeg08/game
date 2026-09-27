@@ -306,3 +306,41 @@ Comparación A/B, `gx_headless --sandbox --minutes 480` con y sin `--no-trader-c
 
 Por semillas, en `docs/DECISIONS.md` (ADR-032). Sin coste de simulación apreciable: el planificador
 recorre como mucho 6 contratos abiertos.
+
+## M3.5 — Finanzas (2026-09-27)
+
+Medido por primera vez en **Linux** (contenedor de 4 hilos, GCC 13.3, Release). Las cifras sin finanzas
+coinciden exactamente con las de M3.4 medidas en Windows/MSVC (por ejemplo, semilla 2400: 8.959 t
+entregadas y 888 t de escasez): en estos escenarios, la simulación es reproducible entre plataformas y
+compiladores.
+
+`gx_headless --sandbox --minutes 480` con y sin `--no-finance`, 3 piratas (por defecto):
+
+| Semilla | Entregas (sin / con) | Escasez (sin / con) | Perdidos (sin / con) | Flota final (pico) | Cascos comprados | Prima final |
+|---|---|---|---|---|---|---|
+| 2400 | 8.959 / 11.917 t | 888 / 1.187 t | 12 / 10 | 24 (24) | 22 | 655 cr/h |
+| 7 | 10.417 / 10.138 t | 325 / 853 t | 5 / 5 | 23 (23) | 17 | 513 cr/h |
+| 99 | 7.602 / 3.919 t | 826 / 1.633 t | 9 / 11 | 17 (17) | 16 | 872 cr/h |
+| 12345 | 8.263 / 7.183 t | 7 / 371 t | 7 / 4 | 10 (12) | 2 | 736 cr/h |
+
+Una sola trayectoria no basta: la semilla 99 con finanzas da entre 3.919 y 7.605 t según la
+perturbación (`--fly-to 1..4`), y sin ellas entre 5.056 y 7.602 t. Por eso la tabla principal promedia 4
+semillas × 3 trayectorias (`--fly-to 1, 2, 4`). Con 0 piratas, las trayectorias coinciden: el jugador no
+perturba nada sin combate.
+
+| Configuración | Entregas | Escasez | Cargueros perdidos | Flota final | Prima |
+|---|---|---|---|---|---|
+| Sin finanzas, 0 piratas | 9.330 t | 448 t | 0 | 12 | — |
+| Con finanzas, 0 piratas | 10.722 t | 300 t | 0 | 20,0 | 253 cr/h |
+| Sin finanzas, 3 piratas | 8.746 t | 527 t | 6,8 | 12 | — |
+| Con finanzas, 3 piratas | 9.052 t | 771 t | 8,8 | 20,0 | 720 cr/h |
+| Con finanzas, 3 piratas, sin patrullas | 8.254 t | 914 t | 10,4 | 19,2 | 847 cr/h |
+| Sin finanzas, 6 piratas | 7.713 t | 784 t | 16,6 | 12 | — |
+| Con finanzas, 6 piratas | 6.207 t | 1.525 t | 12,7 | 18,9 | 921 cr/h |
+
+Dirección por trayectoria (de 0 a 6 piratas): con finanzas, menos entregas y más escasez en 12 de 12; sin
+ellas, en 11 y 9 de 12. Las patrullas mejoran la media, pero por trayectoria solo en 5 de 12.
+
+**Coste:** `Game.Finance` recorre los cargueros una vez por minuto. A igual flota (tope de 12), 8 h de
+sandbox tardan 1,92 s con finanzas y 1,95 s sin ellas (3 ejecuciones cada una): diferencia dentro del ruido.
+Una flota de 24 cargueros cuesta un ~7 % más de tiempo de simulación.

@@ -3,6 +3,8 @@ add_library(gx_simulation STATIC
     Commands/CommandQueue.h
     Economy/Economy.cpp
     Economy/Economy.h
+    Economy/Finance.cpp
+    Economy/Finance.h
     Events/EventBus.cpp
     Events/EventBus.h
     Kernel/Simulation.cpp

@@ -248,6 +248,39 @@ inline constexpr i64 kContractTreasuryReserve = 5'000; // plus the patrol budget
 inline constexpr f64 kReputationContractDone = 3.0;
 inline constexpr f64 kReputationContractFailed = -5.0;
 
+// --- Finance (ADR-033) -------------------------------------------------------------------------------------
+// Ships are bought, not spawned. A trader's hull is paid for by its owner's savings and a loan from the
+// system's bank, which lends its capital and the deposits of the traders who did well. The traders' mutual
+// insures every hull at a premium priced from its own loss experience. Rates are per hour of game time:
+// at the real-time scale a trade turns its capital over in minutes (ADR-021).
+inline constexpr i64 kHaulerHullPrice = 6'000; // a new Carguero from the yards (outside the system)
+inline constexpr f64 kHullRecovery = 0.5;      // share of the hull price a repossessed ship sells for
+inline constexpr i64 kBankCapital = 40'000;
+inline constexpr f64 kLoanRatePerHour = 0.02;
+inline constexpr f64 kDepositRatePerHour = 0.005;   // at most: the bank passes on part of what its loans earn
+inline constexpr f64 kDepositPassThrough = 0.5;     // share of the loan interest the deposits can get
+inline constexpr f64 kLoanTermHours = 12.0;         // equal principal instalments, paid every minute
+inline constexpr f64 kBankReserveRatio = 0.2;       // share of the deposits the bank keeps in cash
+inline constexpr f64 kRequiredCoverage = 1.25;      // DSCR: (expected earnings - premium) / debt service
+inline constexpr f64 kEarningsPrior = 900.0;        // cr per ship-hour the bank assumes before any evidence
+inline constexpr f64 kEarningsPriorHours = 20.0;    // how many ship-hours that assumption weighs
+inline constexpr f64 kExperienceHalfLife = 7'200.0; // s: the bank and the mutual forget old experience
+inline constexpr i64 kTraderCashReserve = 5'000;    // traders keep this on board; the rest pays debt or saves
+inline constexpr i64 kWorkingCapital =
+    6'000;                                   // the bank tops a trader's credits up to this (hull as security)
+inline constexpr f64 kMinDownPayment = 0.25; // of the hull: the bank lends the rest at most (its LTV)
+inline constexpr i64 kNewcomerSavings = 4'500; // an outsider's down payment and first credits to trade
+inline constexpr f64 kInitialDebtShare = 0.5;  // at the start, each hull still owes up to this share
+inline constexpr SimDuration kBuyerPatience = SimDuration::minutes(30); // then an owner without credit leaves
+inline constexpr SimDuration kNewcomerInterval = SimDuration::minutes(5); // outsiders arrive one at a time
+inline constexpr i64 kMutualCapital = 40'000;
+inline constexpr f64 kPremiumLoading = 0.25; // over the expected claims, while the fund is below its target
+inline constexpr i64 kMutualTargetFund = 80'000; // above it the mutual charges only the expected claims
+inline constexpr f64 kLossRatePrior = 0.07;      // hull losses per ship-hour before any experience
+inline constexpr f64 kClaimCostPrior = 550.0;    // cr of claims per ship-hour: those losses and repairs
+inline constexpr f64 kLossRatePriorHours = 40.0; // how many ship-hours of experience the prior weighs
+inline constexpr f64 kPremiumNewsChange = 0.25;  // a premium move this large makes the news
+
 enum class PortRole : u8 { Planet, Refinery, Factory, Industry };
 
 // Economic profile of a port. Targets and capacities are filled in by the caller from the rates.

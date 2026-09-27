@@ -8,6 +8,7 @@ add_library(gx_gameplay STATIC
     Sandbox/Sandbox.cpp
     Sandbox/Sandbox.h
     Sandbox/SandboxContracts.cpp
+    Sandbox/SandboxFinance.cpp
 )
 
 target_link_libraries(gx_gameplay PUBLIC gx_space)

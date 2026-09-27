@@ -898,6 +898,25 @@ void GameApp::drawEconomyInspector() {
         static_cast<unsigned long long>(stats.tonnesDelivered),
         static_cast<unsigned long long>(stats.repositionTrips),
         static_cast<unsigned long long>(stats.explorationTrips));
+    if (sandbox().config().finance) {
+        const BankLedger& bank = sandbox().bank();
+        const MutualLedger& mutual = sandbox().mutual();
+        ImGui::Text("Banco: capital %lld cr (caja %lld, préstamos %lld, depósitos %lld) · impagos %lld",
+                    static_cast<long long>(bank.equity()), static_cast<long long>(bank.cash),
+                    static_cast<long long>(bank.loans), static_cast<long long>(bank.deposits),
+                    static_cast<long long>(bank.writtenOff));
+        ImGui::Text("Mutua de Fletadores: fondo %lld cr · prima %.0f cr/h por carguero · siniestros %lld cr "
+                    "(%llu cascos, reparaciones %lld)",
+                    static_cast<long long>(mutual.fund), sandbox().premiumPerHour(),
+                    static_cast<long long>(mutual.claimsPaid), static_cast<unsigned long long>(mutual.claims),
+                    static_cast<long long>(mutual.repairsPaid));
+        ImGui::Text(
+            "Flota: %zu cargueros · uno más ganaría %.0f cr/h · %llu comprados · %llu embargados · %zu "
+            "armadores esperando",
+            simulation().world().components<HaulerBrain>().size(), sandbox().expectedEarningsPerHour(),
+            static_cast<unsigned long long>(stats.shipsBought),
+            static_cast<unsigned long long>(stats.repossessions), sandbox().buyers().size());
+    }
     for (const MarketView& market : m_snapshot.markets) {
         const std::string label =
             std::format("{} (peligro {:.2f})###eco{}", nameOf(market.port),

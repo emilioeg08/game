@@ -220,8 +220,10 @@ GX_TEST(Sandbox, SnapshotDescribesTheWorld) {
 }
 
 GX_TEST(Sandbox, PiratesHuntHaulersAndLossesAreReplaced) {
+    // Without finance (M3.4): losses come back for free, one newcomer a minute.
     SandboxConfig config;
     config.pirates = 4;
+    config.finance = false;
     Session session(3, config);
     session.sandbox.populate(session.simulation);
     session.simulation.runFor(SimDuration::minutes(60));
@@ -410,19 +412,22 @@ GX_TEST(Sandbox, GoodsAreConservedThroughTradeAndLosses) {
 }
 
 GX_TEST(Sandbox, HaulersTradeAtAProfit) {
-    Session session(3, peaceful());
+    SandboxConfig config = peaceful();
+    config.maxHaulers = config.haulers; // the same traders from start to end
+    Session session(3, config);
     session.sandbox.populate(session.simulation);
     const World& world = session.simulation.world();
-    session.simulation.runFor(SimDuration::hours(4));
-    // Net worth: money plus the cargo being carried (at base prices), after taxes and wages.
-    f64 worth = 0.0;
-    for (const EntityId hauler : world.components<HaulerBrain>().entities()) {
-        worth += static_cast<f64>(world.components<Wallet>().get(hauler).credits);
-        for (const CargoItem& item : world.components<CargoHold>().get(hauler).items) {
-            worth += item.tonnes * session.sandbox.economy().basePrice(item.good);
+    // Net worth: credits, savings and cargo (at base prices) less debt; after taxes, wages and premiums.
+    const auto worth = [&] {
+        i64 total = 0;
+        for (const EntityId hauler : world.components<HaulerBrain>().entities()) {
+            total += session.sandbox.traderWorth(world, hauler);
         }
-    }
-    GX_EXPECT(worth > static_cast<f64>(content::kHaulerStartCredits * session.sandbox.config().haulers));
+        return total;
+    };
+    const i64 initial = worth();
+    session.simulation.runFor(SimDuration::hours(4));
+    GX_EXPECT(worth() > initial);
     GX_EXPECT(session.sandbox.stats().wagesPaid > 0);
     GX_EXPECT(session.sandbox.stats().tonnesDelivered > 1'000);
 }
@@ -434,19 +439,26 @@ GX_TEST(Sandbox, PiratesDisruptTheSupplyChain) {
         config.pirates = pirates;
         Session session(3, config);
         session.sandbox.populate(session.simulation);
-        // Eight hours: over shorter runs the newcomers' fresh capital masks the losses (measured).
         session.simulation.runFor(SimDuration::hours(8));
         u64 lost = 0;
         for (const u64 tonnes : session.sandbox.stats().cargoLost) {
             lost += tonnes;
         }
-        return std::pair<u64, u64>{session.sandbox.stats().tonnesDelivered, lost};
+        f64 shortage = 0.0;
+        for (const Market& market : session.simulation.world().components<Market>().values()) {
+            for (const MarketGood& good : market.goods) {
+                shortage += good.shortage;
+            }
+        }
+        return std::pair<f64, u64>{shortage, lost};
     };
-    const auto [calmDelivered, calmLost] = run(0);
-    const auto [raidedDelivered, raidedLost] = run(6);
+    // Unmet demand, not tonnes delivered: with finance a calm system grows its fleet and a raided one pays
+    // for its losses, so the populations' shortage is the robust measure (x3 in every measured seed).
+    const auto [calmShortage, calmLost] = run(0);
+    const auto [raidedShortage, raidedLost] = run(6);
     GX_EXPECT_EQ(calmLost, 0u);
     GX_EXPECT(raidedLost > 0);
-    GX_EXPECT(raidedDelivered < calmDelivered);
+    GX_EXPECT(raidedShortage > calmShortage);
 }
 
 GX_TEST(Sandbox, PlayerBuysAndSellsWhenDocked) {
@@ -604,7 +616,10 @@ GX_TEST(Sandbox, StationRepairsAreChargedAndNeedMoney) {
 }
 
 GX_TEST(Sandbox, BrokeTradersRetireAndAreReplaced) {
-    Session session(0, peaceful());
+    // Without finance (M3.4): a trader that cannot pay its crew leaves; a newcomer takes its place.
+    SandboxConfig config = peaceful();
+    config.finance = false;
+    Session session(0, config);
     session.sandbox.populate(session.simulation);
     World& world = session.simulation.world();
     const EntityId hauler = world.components<HaulerBrain>().entities()[0];
@@ -1063,4 +1078,197 @@ GX_TEST(Sandbox, TradersNeverTakeThePlayersContracts) {
             GX_EXPECT_EQ(contract.holderFaction, static_cast<u32>(content::kFactionPlayer));
         }
     }
+}
+
+// --- Finance (ADR-033)
+// --------------------------------------------------------------------------------------
+
+namespace {
+
+// Every credit the bank lent or holds belongs to someone: the traders' books and the owners waiting for a
+// ship add up to the ledgers, and the ledgers balance.
+void expectBooksBalance(const Session& session) {
+    const World& world = session.simulation.world();
+    const BankLedger& bank = session.sandbox.bank();
+    i64 debts = 0;
+    i64 deposits = 0;
+    for (const TraderFinance& books : world.components<TraderFinance>().values()) {
+        debts += books.debt;
+        deposits += books.deposit;
+        GX_EXPECT(books.debt >= 0 && books.deposit >= 0);
+    }
+    for (const ShipBuyer& buyer : session.sandbox.buyers()) {
+        deposits += buyer.equity;
+    }
+    GX_EXPECT(bank.balanced());
+    GX_EXPECT(session.sandbox.mutual().balanced());
+    GX_EXPECT_EQ(debts, bank.loans);
+    GX_EXPECT_EQ(deposits, bank.deposits);
+}
+
+} // namespace
+
+GX_TEST(Sandbox, BankAndMutualBooksBalanceAndMatchTheTraders) {
+    Session session(3); // pirates: losses, claims, repairs, repossessions and new ships
+    session.sandbox.populate(session.simulation);
+    expectBooksBalance(session);
+    for (int hour = 0; hour < 6; ++hour) {
+        session.simulation.runFor(SimDuration::hours(1));
+        expectBooksBalance(session);
+    }
+    const SandboxStats& stats = session.sandbox.stats();
+    GX_EXPECT(session.sandbox.mutual().claims > 0);
+    GX_EXPECT(session.sandbox.mutual().repairsPaid > 0);
+    GX_EXPECT(stats.premiumsPaid > 0);
+    GX_EXPECT(session.sandbox.bank().interestEarned > 0);
+    GX_EXPECT(stats.shipsBought > 0);
+    GX_EXPECT_EQ(stats.shipsBought,
+                 stats.shipsByReturningOwners + stats.shipsByExpansion + stats.shipsByOutsiders);
+    GX_EXPECT_EQ(stats.shipyardPaid, static_cast<i64>(stats.shipsBought) * content::kHaulerHullPrice);
+    GX_EXPECT(session.simulation.world().components<HaulerBrain>().size() <=
+              session.sandbox.config().fleetCap());
+}
+
+GX_TEST(Sandbox, LostHullsAreInsuredAndTheirOwnersBuyAnother) {
+    SandboxConfig config;
+    config.pirates = 1;
+    config.maxPatrols = 0;
+    config.maxHaulers = config.haulers;
+    Session session(0, config);
+    session.sandbox.populate(session.simulation);
+    World& world = session.simulation.world();
+    // The raider waits far above the ecliptic, where nobody passes, while the trade builds a record (the
+    // bank and the mutual judge by experience: early on their priors say trade barely pays its premium).
+    const EntityId pirate = world.components<PirateBrain>().entities()[0];
+    const Vec3d spot{0.0, 0.0, 5e10};
+    const auto park = [&] {
+        world.components<Kinematics>().get(pirate) = {spot, {}, {}};
+        world.components<ShipControl>().get(pirate).point = spot;
+        world.components<PirateBrain>().get(pirate).nextMove =
+            session.simulation.now() + SimDuration::hours(9);
+    };
+    park();
+    session.simulation.runFor(SimDuration::hours(4));
+    park();
+    GX_REQUIRE(session.sandbox.mutual().claims == 0);
+
+    // The most solvent trader, nearly wrecked, stopped next to it (a trader deep in debt would have too
+    // little left after paying the bank to buy another ship, and would leave).
+    EntityId hauler;
+    for (const EntityId ship : world.components<HaulerBrain>().entities()) {
+        if (!hauler.isValid() ||
+            session.sandbox.traderWorth(world, ship) > session.sandbox.traderWorth(world, hauler)) {
+            hauler = ship;
+        }
+    }
+    const std::string name = world.components<ShipIdentity>().get(hauler).name;
+    world.components<HaulerBrain>().get(hauler).departAt = session.simulation.now() + SimDuration::hours(9);
+    ShipControl& control = world.components<ShipControl>().get(hauler);
+    control.mode = FlightMode::Stop;
+    control.arrived = true;
+    world.components<Kinematics>().get(hauler) = {spot + Vec3d{150'000.0, 0.0, 0.0}, {}, {}};
+    world.components<ShipModules>().get(hauler).modules[0].health = 5.0;
+    const i64 loansBefore = session.sandbox.bank().loans;
+    const i64 debt = world.components<TraderFinance>().get(hauler).debt;
+    session.simulation.runFor(SimDuration::seconds(20));
+
+    GX_REQUIRE(!world.isAlive(hauler));
+    GX_EXPECT_EQ(session.sandbox.mutual().claims, 1u);
+    GX_EXPECT_EQ(session.sandbox.mutual().claimsPaid - session.sandbox.mutual().repairsPaid,
+                 content::kHaulerHullPrice);
+    GX_EXPECT(session.sandbox.bank().loans <= loansBefore - debt); // the payout cleared its debt
+    GX_EXPECT_EQ(session.sandbox.bank().writtenOff, 0);
+    GX_REQUIRE(session.sandbox.buyers().size() == 1u); // what is left waits at the bank for a new hull
+    GX_EXPECT(session.sandbox.buyers()[0].name == name);
+    GX_EXPECT(session.sandbox.buyers()[0].equity >= content::kHaulerHullPrice - debt);
+    expectBooksBalance(session);
+
+    // After the delay the owner buys a new ship at a station's yards, under the same name.
+    session.simulation.runFor(SimDuration::minutes(3));
+    GX_EXPECT_EQ(session.sandbox.stats().shipsByReturningOwners, 1u);
+    GX_EXPECT(session.sandbox.buyers().empty());
+    bool back = false;
+    for (const EntityId ship : world.components<HaulerBrain>().entities()) {
+        back = back || world.components<ShipIdentity>().get(ship).name == name;
+    }
+    GX_EXPECT(back);
+    GX_EXPECT(session.journalContains("vuelve con un carguero nuevo"));
+    expectBooksBalance(session);
+}
+
+GX_TEST(Sandbox, IlliquidTradersBorrowAndInsolventOnesAreRepossessed) {
+    SandboxConfig config = peaceful();
+    config.maxHaulers = config.haulers;
+    Session session(0, config);
+    session.sandbox.populate(session.simulation);
+    World& world = session.simulation.world();
+    const auto ready = [&](EntityId hauler) {
+        world.components<HaulerBrain>().get(hauler).departAt = session.simulation.now();
+        world.components<ShipControl>().get(hauler).arrived = true;
+    };
+
+    // Short of credits but with a hull worth more than its debt: the bank lends against it.
+    const EntityId illiquid = world.components<HaulerBrain>().entities()[0];
+    TraderFinance& books = world.components<TraderFinance>().get(illiquid);
+    world.components<Wallet>().get(illiquid).credits = -500;
+    const i64 debt = books.debt;
+    ready(illiquid);
+    session.simulation.runFor(SimDuration::seconds(20));
+    GX_EXPECT(world.isAlive(illiquid));
+    GX_EXPECT(world.components<TraderFinance>().get(illiquid).debt > debt);
+    GX_EXPECT_EQ(session.sandbox.stats().bankruptcies, 0u);
+
+    // Deeper in the red than its hull can secure: the bank lends up to the limit, and it is still short.
+    // Bankrupt: the bank sells the hull (it comes first: it is the security) and loses the rest.
+    const EntityId insolvent = world.components<HaulerBrain>().entities()[1];
+    const auto limit =
+        static_cast<i64>((1.0 - content::kMinDownPayment) * static_cast<f64>(content::kHaulerHullPrice));
+    world.components<Wallet>().get(insolvent).credits = -20'000;
+    ready(insolvent);
+    session.simulation.runFor(SimDuration::seconds(20));
+    GX_EXPECT(!world.isAlive(insolvent));
+    GX_EXPECT_EQ(session.sandbox.stats().bankruptcies, 1u);
+    GX_EXPECT_EQ(session.sandbox.stats().repossessions, 1u);
+    const auto sale = static_cast<i64>(content::kHullRecovery * static_cast<f64>(content::kHaulerHullPrice));
+    GX_EXPECT_EQ(session.sandbox.bank().writtenOff, limit - sale);
+    GX_EXPECT(session.journalContains("embarga"));
+    expectBooksBalance(session);
+}
+
+GX_TEST(Sandbox, InsuranceCoversTradersRepairs) {
+    Session session(0, peaceful());
+    session.sandbox.populate(session.simulation);
+    World& world = session.simulation.world();
+    // A trader docked at a station, damaged and without a credit to its name.
+    EntityId hauler;
+    for (const EntityId ship : world.components<HaulerBrain>().entities()) {
+        const CelestialBody* port =
+            world.components<CelestialBody>().tryGet(world.components<ShipControl>().get(ship).target);
+        hauler = !hauler.isValid() && port != nullptr && port->kind == BodyKind::Station ? ship : hauler;
+    }
+    GX_REQUIRE(hauler.isValid());
+    world.components<HaulerBrain>().get(hauler).departAt = session.simulation.now() + SimDuration::hours(1);
+    world.components<Wallet>().get(hauler).credits = 0;
+    ShipModule& structure = world.components<ShipModules>().get(hauler).modules[0];
+    structure.health = structure.maxHealth * 0.5;
+    const i64 treasury = session.sandbox.treasury();
+    session.simulation.runFor(SimDuration::seconds(30));
+    GX_EXPECT_NEAR(structure.fraction(), 1.0, 1e-9);
+    const auto cost = std::llround(structure.maxHealth * 0.5 * content::kRepairCostPerPoint);
+    GX_EXPECT_NEAR(static_cast<f64>(session.sandbox.mutual().repairsPaid), static_cast<f64>(cost), 2.0);
+    GX_EXPECT(session.sandbox.treasury() >= treasury + cost - 2); // the station is paid all the same
+    GX_EXPECT(session.sandbox.mutual().balanced());
+}
+
+GX_TEST(Sandbox, PeacefulTradeAttractsInvestment) {
+    // Without losses the premium falls and the business pays for more ships: savings and credit buy them.
+    Session session(3, peaceful());
+    session.sandbox.populate(session.simulation);
+    session.simulation.runFor(SimDuration::hours(6)); // first the bank's capital funds working capital
+    const SandboxStats& stats = session.sandbox.stats();
+    GX_EXPECT(session.simulation.world().components<HaulerBrain>().size() > session.sandbox.config().haulers);
+    GX_EXPECT(stats.shipsByOutsiders + stats.shipsByExpansion > 0);
+    GX_EXPECT(session.sandbox.premiumPerHour() < content::kClaimCostPrior); // a clean record lowers the price
+    GX_EXPECT(session.journalContains("carguero"));
+    expectBooksBalance(session);
 }

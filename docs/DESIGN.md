@@ -6,7 +6,7 @@
 > (`Game/Sandbox/Content.h`) o en parámetros de generación, no dispersos por los sistemas, para que moverlos
 > a ficheros de datos (modding) sea un cambio local.
 
-## Estado: slice M3.4 "Los comerciantes también aceptan contratos"
+## Estado: slice M3.5 "El dinero tiene origen: crédito, seguros e inversión"
 
 Se puede:
 
@@ -24,11 +24,14 @@ Se puede:
 - ver cómo la Autoridad **patrulla** con lo que recauda (M3.2): acude a las llamadas de socorro, persigue
   piratas y va a por ti si eres hostil;
 - aceptar **contratos** (M3.3) que nacen de la situación real: suministros a puertos con escasez y
-  recompensas por piratas identificados. Los cargueros compiten por los suministros (M3.4).
+  recompensas por piratas identificados. Los cargueros compiten por los suministros (M3.4);
+- ver cómo el **dinero tiene origen** (M3.5): los cargueros se compran con ahorros y crédito del banco
+  del sistema, la Mutua de Fletadores asegura los cascos con una prima que sigue a las pérdidas reales, y
+  la flota crece o se contrae según lo que rinde el comercio.
 
 Con esto el primer vertical slice del prompt (§5) está completo.
 
-**Todavía no hay:** crédito, deuda, seguros ni inversión; misiles ni defensa puntual; facciones políticas;
+**Todavía no hay:** crédito ni seguros para el jugador; misiles ni defensa puntual; facciones políticas;
 más de un sistema estelar.
 
 ## Escala, unidades y tiempo
@@ -258,8 +261,9 @@ cada 20 minutos.
 **Tripulaciones.**
 
 - Cada carguero paga 5 cr por minuto de salarios (300 cr/h), en puerto o en ruta.
-- Un comerciante en números rojos **quiebra** al intentar salir de puerto: vende lo que tiene, abandona el
-  sistema y otro lo sustituye más tarde (con capital nuevo).
+- Un comerciante en números rojos **quiebra** al intentar salir de puerto: vende lo que tiene y abandona el
+  sistema. Desde M3.5, solo si ya no le quedan ahorros ni crédito contra su casco, y el banco embarga el
+  casco (ver Finanzas).
 
 **Reputación con la Autoridad y los comerciantes** (−100 a 100; empieza en 0):
 
@@ -335,8 +339,9 @@ y va a la vista: radar y transpondedor siempre encendidos.
 | Sin patrullas | 18,2 | 11.220–13.301 t |
 | Con 3 patrullas | 10,0 (−45 %) | 9.793–14.449 t |
 
-- Las entregas no cambian más allá del ruido. Cada carguero perdido vuelve con capital nuevo, lo que
-  enmascara el daño.
+- Las entregas no cambian más allá del ruido. Cada carguero perdido volvía con capital nuevo, lo que
+  enmascaraba el daño. Con las finanzas de M3.5 las pérdidas se pagan, y las patrullas se notan también en
+  la prima del seguro (ver Finanzas).
 - Sin las llamadas de socorro, las patrullas no servían: llegaban tarde a donde ya no había piratas
   (ADR-030).
 
@@ -379,6 +384,90 @@ Medido en 8 h y 4 semillas:
 **Medido** (8 h, 4 semillas, 3 piratas, hasta 3 patrullas): se publican entre 18 y 43 contratos. Con
 patrullas se pierden 31 cargueros frente a 46 sin ellas (−33 %). Cuando las recompensas salían de la
 misma tesorería sin prioridad, había semillas con solo 2 patrullas y el efecto bajaba al −26 %.
+
+## Finanzas (ADR-033)
+
+Hasta M3.4, un carguero perdido o quebrado reaparecía al minuto con 3.000 cr salidos de la nada. Desde M3.5
+cada crédito sale de algún sitio: los cascos se compran y las pérdidas se pagan.
+
+**Los actores.**
+
+| Actor | Qué hace | Con qué dinero |
+|---|---|---|
+| Banco del sistema | presta para comprar cascos y como circulante; guarda los ahorros | 40.000 cr de capital, los depósitos de los comerciantes y los intereses |
+| Mutua de Fletadores | asegura los cascos: paga la pérdida total (6.000 cr) y las reparaciones en estación | 40.000 cr de capital y las primas |
+| Astilleros | venden cascos nuevos (6.000 cr) | fuera del sistema |
+| Comerciantes | pagan prima, intereses y amortización cada minuto; ahorran lo que les sobra | lo que ganan comerciando |
+
+**El comerciante, cada minuto.**
+
+- Paga la **prima** (sale de la experiencia de la Mutua, ver abajo), los **intereses** (2 %/h de la deuda)
+  y una **cuota** de amortización (la deuda en 12 horas).
+- Si le sobra más de 5.000 cr a bordo, amortiza antes la deuda (cuesta más de lo que rinde ahorrar) y
+  deposita el resto en el banco.
+- Al planear un viaje dispone de sus ahorros. Si tiene menos de 6.000 cr, el banco le presta contra el
+  casco, hasta el **75 % de su valor** (LTV).
+- **Iliquidez no es insolvencia:** solo quiebra quien sigue en números rojos con la garantía agotada.
+  Entonces el banco embarga el casco, lo vende por la mitad y cobra primero (es la garantía). Lo que falte
+  es su pérdida.
+
+**Los depósitos** rinden a lo sumo el 0,5 %/h, y nunca más de la mitad de lo que ganan los préstamos
+(tipo = 2 %/h × préstamos/depósitos × 0,5): los ahorros que nadie pide prestados no rinden casi nada, y el
+banco no pierde dinero guardándolos.
+
+**El seguro.**
+
+- La Mutua paga el casco de un carguero perdido (destruido o abordado) y las reparaciones en estación de
+  sus asegurados. Si su fondo no alcanza, paga lo que tiene (el casco) o no cubre (la reparación).
+- La **prima** es la siniestralidad esperada por nave-hora (créditos de siniestros por hora asegurada) más
+  un recargo del 25 %. Mientras el fondo supere 80.000 cr, no hay recargo: una mutua no busca beneficio.
+- La siniestralidad se estima por **credibilidad bayesiana con olvido**: (créditos reclamados + prior × 40)
+  / (horas aseguradas + 40), con un prior de 550 cr por nave-hora y la experiencia a la mitad cada 2 horas
+  (para el número de pérdidas es la media posterior de un modelo Gamma-Poisson). Sin historial manda el
+  prior; con historial, lo que ha pasado.
+- La prima sale en el diario cuando se mueve un 25 %.
+
+**Quién compra cascos**, uno por minuto como mucho y hasta el doble de la flota inicial:
+
+1. **Armadores que perdieron su nave**, primero. La indemnización paga su deuda; lo que queda, con sus
+   ahorros, es su entrada. Esperan 1 minuto y como mucho 30. Si lo que les queda no llega al 25 % del casco,
+   se retiran. Mientras esperan, tienen su plaza reservada.
+2. **Ampliación:** el comerciante con más ahorros, si le alcanzan para un casco y su circulante, compra
+   otro con su nombre ("Albatros-20 invierte sus ahorros en un segundo carguero, Albatros-47").
+3. **Recién llegados**, uno cada 5 minutos: traen 4.500 cr (capital externo), dan 1.500 de entrada y piden
+   el resto al banco.
+
+**Cuándo presta el banco.** Estima lo que ganaría un carguero más (tras impuestos, reparaciones y
+salarios, antes de prima y deuda) y exige un **DSCR** de 1,25: (ganancia esperada − prima) ≥ 1,25 ×
+servicio de la deuda (cuota + intereses). Además necesita la caja: conserva el 20 % de los depósitos.
+
+- La ganancia por nave-hora se estima igual que la siniestralidad (prior de 900 cr/h, peso de 20
+  nave-horas, olvido de 2 horas).
+- **Dilución:** con el comercio saturado, el beneficio total apenas crece con la flota (medido: ~11.000–
+  14.000 cr/h con 7, 16 o 22 cargueros). Así que la ganancia observada se multiplica por min(1, flota media
+  del periodo / (flota actual + 1)). Sin esto, el banco prestaba con datos de cuando había menos barcos,
+  y había ciclos de auge y caída: de 7 a 34 cargueros y de vuelta a 16, con 18 embargos en 16 h.
+- El diario anuncia cuándo el banco deja de financiar y cuándo vuelve a hacerlo.
+
+**Medido** (8 h, 4 semillas × 3 trayectorias, medias por partida):
+
+| Piratas | Entregas sin finanzas | Entregas con finanzas | Escasez sin | Escasez con | Flota final | Prima |
+|---|---|---|---|---|---|---|
+| 0 | 9.330 t | 10.722 t (+15 %) | 448 t | 300 t (−33 %) | 20,0 | 253 cr/h |
+| 3 | 8.746 t | 9.052 t | 527 t | 771 t | 20,0 | 720 cr/h |
+| 6 | 7.713 t | 6.207 t (−20 %) | 784 t | 1.525 t (×2) | 18,9 | 921 cr/h |
+
+- **En paz, la inversión amplía la capacidad:** la flota crece hasta 20–24 cargueros y la escasez baja.
+- **La piratería se paga.** De 0 a 6 piratas, las entregas caen un 42 % con finanzas (un 17 % sin ellas) y
+  la escasez se multiplica por 5 (×1,75 sin ellas). Con finanzas pasa en las 12 trayectorias; sin ellas,
+  en 11 y 9 de 12. El coste real de las pérdidas y las averías (~620 cr por nave-hora con 3 piratas) es
+  casi la mitad del margen del comercio, y los comerciantes descapitalizados compran cargas más pequeñas.
+- **Las patrullas abaratan el seguro.** Con 3 piratas, sin patrullas se pierden 10,4 cargueros y la prima
+  es de 847 cr/h; con ellas, 8,8 y 720 (−15 %). Las entregas suben un 10 % de media, pero por trayectoria
+  el efecto queda dentro del ruido (5 de 12).
+- **Más dependencia de la trayectoria:** la misma semilla da entre 3.900 y 7.600 t según perturbaciones
+  mínimas (sin finanzas, entre 5.100 y 7.600). El crédito amplifica la suerte: una mala racha
+  descapitaliza, y la descapitalización frena la recuperación.
 
 ## Facciones y personajes (mínimo)
 
@@ -457,7 +546,8 @@ misma tesorería sin prioridad, había semillas con solo 2 patrullas y el efecto
 2. Misiles, defensa puntual, blindaje o escudos.
 3. Piratas que saquean en lugar de destruir; sensores fijos en las estaciones; patrullas que escoltan
    convoyes.
-4. Resto de la economía del §18: crédito, deuda, seguros e inversión (comerciantes que compran naves).
+4. Crédito y seguros para el jugador; seguro de la carga; piratas con economía propia (hoy reaparecen
+   gratis, igual que los cargueros antes de M3.5).
 5. Población con efectos: la escasez debería afectar a la estabilidad y al crecimiento.
 6. Viaje entre sistemas y la estructura de la galaxia.
 7. Nombre del juego, tono y estética definitiva.
