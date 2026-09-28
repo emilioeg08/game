@@ -397,3 +397,36 @@ Escoltas protegen al primero):
 (4 Mineros, 2 Cargueros y 2 Escoltas), 2,43 s (3 ejecuciones cada una). Un 31 % más de tiempo para un 67 %
 más de naves. Lo que más crece son los sensores: cada nave de la flota es otro sensor de la facción del
 jugador.
+
+## M5 — Destrucción localizada, pecios y salvamento (2026-09-28)
+
+Linux (4 hilos, GCC 13.3, Release), `gx_headless --sandbox --minutes 480`.
+
+**Línea base NPC** (4 semillas × 3 trayectorias). Los pecios son entidades, así que los identificadores y
+los flujos aleatorios por nave se desplazan; el resultado queda dentro del ruido de M4:
+
+| Piratas | Entregas M4 → M5 | Escasez M4 → M5 | Cargueros perdidos | Prima |
+|---|---|---|---|---|
+| 0 | 10.913 → 10.913 t | 216 → 216 t | 0 → 0 | 253 → 253 cr/h |
+| 3 | 8.779 → 8.846 t | 672 → 621 t | 6,2 → 7,1 | 631 → 673 cr/h |
+| 6 | 6.522 → 7.121 t | 1.242 → 1.307 t | 14,1 → 12,7 | 1.038 → 919 cr/h |
+
+Sin piratas no se destruye nada y las cifras coinciden exactamente.
+
+**Pecios en 8 h con 3 piratas** (una trayectoria por semilla):
+
+| Semilla | Pecios | Chatarra | Impactos de escombros | Un Carguero salvador (desde 22.000 cr) |
+|---|---|---|---|---|
+| 2400 | 48 | 185 t | 0 | +22.353 cr, 402 t recuperadas |
+| 7 | 25 | 79 t | 0 | −2.410 cr, 23 t |
+| 99 | 6 | 21 t | 0 | −3.145 cr, 64 t |
+| 12345 | 28 | 95 t | 0 | −4.214 cr, 98 t |
+
+- El salvamento es un negocio de guerra: rinde donde caen muchas naves cerca de lo que ve la empresa. En la
+  semilla 2400 un solo Carguero salvador gana más que un Minero en paz; en las demás no cubre salarios y prima.
+- Las nubes de escombros casi nunca se cruzan deprisa (0–1 impactos por partida): los combates se libran a
+  150–300 km y las nubes miden 2–30 km. Quien se lanza a través de una a 20 km/s recibe impactos (test).
+- **Memoria:** el primer `breakUpShip` guardaba un puntero a la `Kinematics` de la nave y luego añadía
+  pecios al mismo almacén. Un test fallaba solo tras otras suites (la memoria liberada contenía basura
+  distinta). Ahora se copian los valores. Las suites Destruction, Fleet y Sandbox pasan con AddressSanitizer
+  y UBSan.

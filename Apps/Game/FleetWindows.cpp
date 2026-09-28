@@ -35,6 +35,8 @@ const char* orderName(FleetOrder order) {
         return tr("Comerciar");
     case FleetOrder::Escort:
         return tr("Escoltar");
+    case FleetOrder::Salvage:
+        return tr("Recuperar restos");
     case FleetOrder::Count:
         break;
     }
@@ -191,10 +193,11 @@ void GameApp::drawFleetOrders(const FleetShipView& ship) {
         m_orderMarket = ship.market;
     }
     if (ImGui::BeginCombo(tr("Orden"), orderName(m_orderKind))) {
-        for (const FleetOrder order :
-             {FleetOrder::Hold, FleetOrder::Dock, FleetOrder::Mine, FleetOrder::Trade, FleetOrder::Escort}) {
-            const bool possible = (order != FleetOrder::Mine || ship.canMine) &&
-                                  (order != FleetOrder::Trade || ship.cargoCapacity > 0);
+        for (const FleetOrder order : {FleetOrder::Hold, FleetOrder::Dock, FleetOrder::Mine,
+                                       FleetOrder::Trade, FleetOrder::Escort, FleetOrder::Salvage}) {
+            const bool possible =
+                (order != FleetOrder::Mine || ship.canMine) &&
+                ((order != FleetOrder::Trade && order != FleetOrder::Salvage) || ship.cargoCapacity > 0);
             if (ImGui::Selectable(orderName(order), m_orderKind == order,
                                   possible ? ImGuiSelectableFlags_None : ImGuiSelectableFlags_Disabled)) {
                 m_orderKind = order;
@@ -254,6 +257,16 @@ void GameApp::drawFleetOrders(const FleetShipView& ship) {
         if (!ship.armed) {
             ImGui::TextDisabled("%s", tr("Sin armas: solo la acompaña."));
         }
+        break;
+    }
+    case FleetOrder::Salvage: {
+        std::vector<EntityId> known;
+        for (const WreckView& wreck : m_snapshot.wrecks) {
+            if (wreck.known) {
+                known.push_back(wreck.id);
+            }
+        }
+        combo(tr("Restos"), m_orderSite, known, tr("los más cercanos"), named);
         break;
     }
     default:
@@ -496,6 +509,51 @@ void GameApp::drawMiningSection(const ShipView& ship) {
         if (ImGui::SmallButton(tr("Ir al campo"))) {
             submitPilot(FlightMode::Approach, nearest->id);
         }
+    }
+}
+
+void GameApp::drawWreckSelection(const WreckView& wreck) {
+    ImGui::TextDisabled(
+        tr("%s  ·  se perderá de vista en %s"), wreck.hulk ? tr("casco") : tr("fragmento"),
+        formatDuration(SimDuration::seconds(static_cast<i64>(std::max(0.0, wreck.expiresIn)))).c_str());
+    if (wreck.contents.empty()) {
+        ImGui::TextDisabled("%s", tr("Vacío."));
+    }
+    for (const CargoItem& item : wreck.contents) {
+        const std::string_view good = tr(std::string_view(sandbox().economy().goods()[item.good].name));
+        ImGui::BulletText("%u t %.*s", item.tonnes, static_cast<int>(good.size()), good.data());
+    }
+    const ShipView* player = m_snapshot.findShip(sandbox().playerShip());
+    if (player != nullptr) {
+        const f64 distance = length(wreck.position - player->position);
+        const f64 speed = length(wreck.velocity - player->velocity);
+        const bool inReach = distance <= content::kSalvageRange && speed <= content::kSalvageSpeed;
+        ImGui::BeginDisabled(!inReach);
+        if (ImGui::Button(tr("Recuperar"))) {
+            simulation().submitCommand(SalvageCommand{player->id, wreck.id});
+        }
+        ImGui::EndDisabled();
+        if (!inReach) {
+            ImGui::SameLine();
+            ImGui::TextDisabled(tr("a menos de 5 km y con su velocidad (ahora %s, %s)"),
+                                formatDistance(distance).c_str(), formatSpeed(speed).c_str());
+        }
+    }
+    bool any = false;
+    for (const FleetShipView& ship : m_snapshot.fleet) {
+        if (ship.cargoCapacity == 0) {
+            continue;
+        }
+        if (!any) {
+            ImGui::Separator();
+            ImGui::TextDisabled("%s", tr("Ordenar recuperarlos:"));
+            any = true;
+        }
+        ImGui::PushID(static_cast<int>(ship.id.index));
+        if (ImGui::SmallButton(std::format("{}###salvage", ship.name).c_str())) {
+            simulation().submitCommand(FleetOrderCommand{ship.id, FleetOrder::Salvage, wreck.id, {}});
+        }
+        ImGui::PopID();
     }
 }
 

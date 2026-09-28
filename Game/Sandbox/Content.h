@@ -358,6 +358,13 @@ inline constexpr f64 kEscortLeash = 6e8;        // m: escorts break off a chase 
 inline constexpr f64 kFleetRetreatStructure = 0.4; // escorts go for repairs below this
 inline constexpr f64 kFleetRepairedStructure = 0.9;
 
+// --- Wrecks and salvage (ADR-039)
+// ---------------------------------------------------------------------------
+inline constexpr SimDuration kWreckLifetime = SimDuration::hours(3); // then it drifts out of reach
+inline constexpr f64 kWreckSightRange = 5e7;                         // m: a ship this close finds a wreck
+inline constexpr f64 kSalvageRange = 5'000.0;                        // m
+inline constexpr f64 kSalvageSpeed = 200.0;                          // m/s, relative
+
 inline constexpr std::array<const char*, 12> kFleetNames = {"Aurora",  "Boreal",  "Cénit",   "Delfín",
                                                             "Eclipse", "Fortuna", "Gaviota", "Horizonte",
                                                             "Iris",    "Júpiter", "Kraken",  "Lucero"};

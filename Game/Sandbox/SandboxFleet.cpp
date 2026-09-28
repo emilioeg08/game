@@ -60,6 +60,8 @@ Message orderText(const World& world, const FleetBrain& brain) {
             world.isAlive(brain.site) ? world.components<ShipIdentity>().tryGet(brain.site) : nullptr;
         return ward != nullptr ? msg("escoltar a {}", literal(ward->name)) : msg("escoltar tu nave");
     }
+    case FleetOrder::Salvage:
+        return msg("recuperar restos y venderlos");
     case FleetOrder::Count:
         break;
     }
@@ -94,6 +96,8 @@ const char* toString(FleetOrder order) {
         return "Trade";
     case FleetOrder::Escort:
         return "Escort";
+    case FleetOrder::Salvage:
+        return "Salvage";
     case FleetOrder::Count:
         break;
     }
@@ -512,6 +516,12 @@ void Sandbox::onFleetOrderCommand(const FleetOrderCommand& command, const TickCo
             return;
         }
         break;
+    case FleetOrder::Salvage:
+        if (command.site.isValid() && !world.components<Wreck>().contains(command.site)) {
+            reject("not a wreck", GX_TEXT("Eso no son restos de una nave."));
+            return;
+        }
+        [[fallthrough]];
     case FleetOrder::Trade:
         if (world.components<CargoHold>().get(command.ship).capacity == 0) {
             reject("no hold", GX_TEXT("Esa nave no tiene bodega."));
@@ -1233,6 +1243,9 @@ void Sandbox::updateFleet(const TickContext& context) {
             break;
         case FleetOrder::Escort:
             fleetEscort(world, ship, brain, now);
+            break;
+        case FleetOrder::Salvage:
+            fleetSalvage(world, ship, brain, now);
             break;
         }
     }

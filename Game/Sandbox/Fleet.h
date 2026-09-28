@@ -62,7 +62,8 @@ struct SellShipCommand {
 //   Mine    cut `site` (a field) until the hold is full, sell at `market` (invalid: the best known price)
 //   Trade   buy and sell on its own, with what the company knows of prices
 //   Escort  follow `site` (a company ship; invalid: the player's) and fight off raiders near it
-enum class FleetOrder : u8 { Hold, Dock, Mine, Trade, Escort, Count };
+//   Salvage collect what the wrecks the company knows hold (`site`: one of them, or any) and sell it
+enum class FleetOrder : u8 { Hold, Dock, Mine, Trade, Escort, Salvage, Count };
 
 [[nodiscard]] const char* toString(FleetOrder order);
 
@@ -198,6 +199,7 @@ struct CompanyTotals {
     i64 repaid = 0;
     i64 repairsInsured = 0; // paid by the mutual straight to the yards (not through the account)
     u64 tonnesMined = 0;
+    u64 tonnesSalvaged = 0;
     u64 shipsLost = 0;
     u64 forcedSales = 0; // sold by the bank: the account stayed overdrawn
 
@@ -219,6 +221,7 @@ struct CompanyTotals {
         ar.io("repaid", repaid);
         ar.io("repairsInsured", repairsInsured);
         ar.io("tonnesMined", tonnesMined);
+        ar.io("tonnesSalvaged", tonnesSalvaged);
         ar.io("shipsLost", shipsLost);
         ar.io("forcedSales", forcedSales);
     }

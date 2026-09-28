@@ -219,6 +219,16 @@ MapSelection MapView::pick(const SystemSnapshot& snapshot, ImVec2 screen, const 
             best = {{}, contact.trackId};
         }
     }
+    for (const WreckView& wreck : snapshot.wrecks) {
+        if (!wreck.known && !options.showTruth) {
+            continue;
+        }
+        const float d = distanceSq(toScreen(wreck.position), screen);
+        if (d < bestDistanceSq) {
+            bestDistanceSq = d;
+            best = {wreck.id, 0};
+        }
+    }
     if (!best.empty()) {
         return best;
     }
@@ -366,6 +376,35 @@ void MapView::draw(const SystemSnapshot& snapshot, const MapSelection& selected,
         if (!isMinor || orbitVisible || body.id == selected.entity || body.id == hovered.entity) {
             addText(drawList, {center.x + radius + 4.0f, center.y - 7.0f},
                     isMinor ? kDimText : kBackgroundText, localizedName(body.name));
+        }
+    }
+
+    // Debris clouds (thin rings, fading as they spread) and the wrecks the player knows about: grey crosses,
+    // larger for a hulk.
+    for (const DebrisView& cloud : snapshot.debris) {
+        const float radius = static_cast<float>(cloud.radius / mpp);
+        if (radius < 3.0f || radius > 1e5f) {
+            continue;
+        }
+        const auto alpha = static_cast<int>(40 + 150 * std::clamp(cloud.density, 0.0, 1.0));
+        drawList.AddCircle(toScreen(cloud.center), radius, IM_COL32(200, 150, 110, alpha), 0, 1.0f);
+    }
+    for (const WreckView& wreck : snapshot.wrecks) {
+        if (!wreck.known && !options.showTruth) {
+            continue;
+        }
+        const ImVec2 center = toScreen(wreck.position);
+        const float size = wreck.hulk ? 5.0f : 3.0f;
+        const ImU32 color = wreck.known ? IM_COL32(170, 170, 160, 230) : kTruthColor;
+        drawList.AddLine({center.x - size, center.y - size}, {center.x + size, center.y + size}, color, 1.5f);
+        drawList.AddLine({center.x - size, center.y + size}, {center.x + size, center.y - size}, color, 1.5f);
+        const bool isSelected = wreck.id == selected.entity;
+        if (isSelected || wreck.id == hovered.entity) {
+            drawList.AddCircle(center, size + 5.0f, isSelected ? kSelectionColor : kDimText, 0, 1.5f);
+        }
+        if (isSelected || wreck.id == hovered.entity || (wreck.hulk && mpp < 2'000.0)) {
+            addText(drawList, {center.x + size + 4.0f, center.y - 7.0f}, kDimText,
+                    trf("Restos de {} ({} t)", wreck.name, wreck.tonnes));
         }
     }
 

@@ -278,6 +278,23 @@ int GameApp::run(const Options& options) {
     if (options.selectField && m_selected.isValid()) {
         m_map.camera().follow = m_selected;
     }
+    if (options.selectWreck) {
+        m_snapshotBuilder.build(simulation(), sandbox(), m_snapshot);
+        Vec3d player;
+        const WreckView* nearest = nullptr;
+        if (m_snapshot.positionOf(sandbox().playerShip(), player)) {
+            for (const WreckView& wreck : m_snapshot.wrecks) {
+                if (wreck.known && (nearest == nullptr || lengthSquared(wreck.position - player) <
+                                                              lengthSquared(nearest->position - player))) {
+                    nearest = &wreck;
+                }
+            }
+        }
+        if (nearest != nullptr) {
+            m_selected = nearest->id;
+            m_map.camera().follow = nearest->id;
+        }
+    }
 
     u32 frame = 0;
     u64 lastNs = platform::monotonicNanoseconds();
@@ -759,6 +776,9 @@ std::string GameApp::nameOf(EntityId entity) const {
     }
     if (const BodyView* body = m_snapshot.findBody(entity)) {
         return localizedName(body->name);
+    }
+    if (const WreckView* wreck = m_snapshot.findWreck(entity)) {
+        return trf("Restos de {}", wreck->name);
     }
     return entity.isValid() ? std::format("#{}", entity.index) : std::string("-");
 }
@@ -1326,6 +1346,10 @@ void GameApp::drawSelectionPanel() {
         if (ImGui::CollapsingHeader(tr("Órdenes"), ImGuiTreeNodeFlags_DefaultOpen)) {
             drawFleetOrders(*fleetShip);
         }
+    }
+    if (const WreckView* wreck = m_snapshot.findWreck(m_selected);
+        wreck != nullptr && ImGui::CollapsingHeader(tr("Restos"), ImGuiTreeNodeFlags_DefaultOpen)) {
+        drawWreckSelection(*wreck);
     }
     if (m_snapshot.findDeposit(m_selected) != nullptr &&
         ImGui::CollapsingHeader(tr("Yacimiento"), ImGuiTreeNodeFlags_DefaultOpen)) {

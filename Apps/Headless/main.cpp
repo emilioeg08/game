@@ -78,6 +78,7 @@ struct Options {
     u32 iceMiners = 0;      // mine the ice field
     u32 fleetHaulers = 0;   // trade on their own
     u32 escorts = 0;        // escort the player's ship
+    u32 salvagers = 0;      // Cargueros that salvage wrecks
     i64 companyCredits = 0; // added to the starting account
 };
 
@@ -114,6 +115,7 @@ void printUsage() {
                 "  --ice-miners <n>    sandbox: ... and n for the ice field\n"
                 "  --fleet-haulers <n> sandbox: ... n Cargueros that trade on their own\n"
                 "  --escorts <n>       sandbox: ... n Escoltas for the player's ship\n"
+                "  --salvagers <n>     sandbox: ... n Cargueros that salvage the wrecks the company knows\n"
                 "  --company-credits <n>  sandbox: added to the company's starting account (default 0;\n"
                 "                      ships it cannot pay for are financed with the least down payment)\n"
                 "  --log-level <lvl>   trace|debug|info|warn|error (default info)\n");
@@ -203,6 +205,8 @@ int parseOptions(int argc, char** argv, Options& options) {
             ok = parseNumber(value(), options.fleetHaulers);
         } else if (arg == "--escorts") {
             ok = parseNumber(value(), options.escorts);
+        } else if (arg == "--salvagers") {
+            ok = parseNumber(value(), options.salvagers);
         } else if (arg == "--company-credits") {
             ok = parseNumber(value(), options.companyCredits) && options.companyCredits >= 0;
         } else if (arg == "--no-profile") {
@@ -374,7 +378,9 @@ void printEconomy(const Simulation& simulation, const Sandbox& sandbox, bool per
         const f64 lost = g < stats.cargoLost.size() ? static_cast<f64>(stats.cargoLost[g]) : 0.0;
         const f64 initial = g < sandbox.initialStock().size() ? sandbox.initialStock()[g] : 0.0;
         // initial + produced + mined - consumed - lost must equal what is in the markets and in the holds.
-        const f64 balance = initial + produced + mined - consumed - lost - stock - cargo;
+        // Scrap from wrecks is metal that enters the system with the hulls (built outside it).
+        const f64 scrap = g == content::kGoodMetals ? static_cast<f64>(stats.scrapCreated) : 0.0;
+        const f64 balance = initial + produced + mined + scrap - consumed - lost - stock - cargo;
         std::printf("economy: %-12s %9.0f %9.0f %7.0f %9.0f %7.0f %9.0f %7.0f %7.0f %7.0f  %+.3f\n",
                     goods[g].name.c_str(), produced, consumed, mined, shortage, lost, stock, cargo, minPrice,
                     maxPrice, balance);
@@ -393,6 +399,12 @@ void printEconomy(const Simulation& simulation, const Sandbox& sandbox, bool per
         static_cast<unsigned long long>(stats.repositionTrips),
         static_cast<unsigned long long>(stats.explorationTrips), static_cast<long long>(haulerCredits),
         world.components<HaulerBrain>().size());
+    std::printf("wrecks: %llu formed, %llu t of scrap, %llu t salvaged, %zu drifting, %zu debris clouds, "
+                "%llu debris hits\n",
+                static_cast<unsigned long long>(stats.wrecksFormed),
+                static_cast<unsigned long long>(stats.scrapCreated),
+                static_cast<unsigned long long>(stats.tonnesSalvaged), world.components<Wreck>().size(),
+                sandbox.debris().size(), static_cast<unsigned long long>(stats.debrisHits));
     std::printf(
         "money: treasury %lld | taxes %lld, repairs %lld, bounties %lld | wages %lld | bankruptcies %llu, "
         "boardings %llu\n",
@@ -567,6 +579,9 @@ int runSandbox(const Options& options) {
     for (u32 i = 0; i < options.fleetHaulers; ++i) {
         order(buy(content::kShipClassHauler), FleetOrder::Trade, {});
     }
+    for (u32 i = 0; i < options.salvagers; ++i) {
+        order(buy(content::kShipClassHauler), FleetOrder::Salvage, {});
+    }
     // Escorts guard the miners first (one each, in order), then the player's ship.
     std::vector<EntityId> wards;
     for (const EntityId ship : simulation.world().components<FleetBrain>().entities()) {
@@ -577,7 +592,8 @@ int runSandbox(const Options& options) {
     for (u32 i = 0; i < options.escorts; ++i) {
         order(buy(content::kShipClassEscort), FleetOrder::Escort, i < wards.size() ? wards[i] : EntityId{});
     }
-    const bool company = options.miners + options.iceMiners + options.fleetHaulers + options.escorts > 0;
+    const bool company =
+        options.miners + options.iceMiners + options.fleetHaulers + options.escorts + options.salvagers > 0;
     // Where the ore goes: the bid of every market that uses it (price and stock against its target).
     const auto oreBids = [&] {
         std::string out;

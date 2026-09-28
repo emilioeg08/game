@@ -4,6 +4,8 @@ add_library(gx_space STATIC
     Bodies/CelestialBody.h
     Combat/Combat.cpp
     Combat/Combat.h
+    Destruction/Debris.cpp
+    Destruction/Debris.h
     Generation/StarSystemGenerator.cpp
     Generation/StarSystemGenerator.h
     Orbits/Kepler.cpp

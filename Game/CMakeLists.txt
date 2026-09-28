@@ -14,6 +14,8 @@ add_library(gx_gameplay STATIC
     Sandbox/SandboxDetail.h
     Sandbox/SandboxFinance.cpp
     Sandbox/SandboxFleet.cpp
+    Sandbox/SandboxWrecks.cpp
+    Sandbox/Wrecks.h
 )
 
 target_link_libraries(gx_gameplay PUBLIC gx_space)

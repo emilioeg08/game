@@ -3,7 +3,8 @@
 Motor propio en C++20 para un sandbox 4X de simulación galáctica persistente: la galaxia existe, cambia y
 produce consecuencias aunque el jugador no la esté mirando.
 
-**Estado: M4 (De nave a empresa: flota propia y minería).** El vertical slice del GDD (§26) está completo. Hay un
+**Estado: M5 (Destrucción localizada: fragmentos, pecios, escombros y salvamento).** El vertical slice del GDD
+(§26) está completo, y la fase 8 del roadmap también. Hay un
 juego en tiempo real (×1, ×3, ×10, ×30):
 
 - un sistema estelar generado con órbitas keplerianas;
@@ -47,6 +48,10 @@ con una prima que se ajusta a tu historial. Tus capitanes siguen órdenes perman
 cinturón de asteroides y vender donde más rinde el ciclo, comerciar por su cuenta, atracar o escoltar a otra
 nave. También puedes tomar el mando de cualquiera y minar a mano. Cada minero baja el precio del mineral, y
 los corsarios acechan los campos donde ven naves: en guerra, una escolta decide si la minería es rentable.
+
+Y lo que se destruye deja rastro. Una nave se parte por sus módulos: los intactos quedan como chatarra y parte
+de la carga sobrevive en pecios que derivan. Solo los ve quien los vio caer o pasa cerca. Tú o tu flota
+podéis recuperarlos. Las explosiones dejan nubes de escombros que golpean a quien las cruza deprisa.
 
 Por debajo están el kernel de M1 (entidades, eventos, comandos, save/load, replay, LOD por frecuencia) y la
 fase 0. El diseño es provisional
@@ -111,7 +116,7 @@ Modo captura para comprobaciones automáticas:
 `gx_game.exe --frames 60 --prerun-hours 30 --select --screenshot captura.png` (`--no-help` cierra la ayuda;
 `--menu main|pause|options` captura los menús; `--demo-fleet` compra una flota de ejemplo y
 `--fleet-tab fleet|books|yards` abre la ventana de la empresa; `--select-field` selecciona un campo de
-asteroides; `--data-dir` usa otra carpeta de datos). Hay un combate reproducible
+asteroides; `--select-wreck` selecciona el pecio conocido más cercano; `--data-dir` usa otra carpeta de datos). Hay un combate reproducible
 con `gx_game.exe --seed 1 --fly-to 1 --prerun-hours 0.0745 --engage-nearest --zoom 1100 --frames 20
 --screenshot combate.png`.
 
@@ -141,6 +146,7 @@ con `gx_game.exe --seed 1 --fly-to 1 --prerun-hours 0.0745 --engage-nearest --zo
 # La empresa del jugador (M4): mineros, cargueros y escoltas con órdenes; cuentas por nave al final
 ./build/release/bin/gx_headless.exe --sandbox --minutes 480 --pirates 0 --miners 2 --company-credits 20000
 ./build/release/bin/gx_headless.exe --sandbox --minutes 480 --miners 3 --escorts 1 --company-credits 30000
+./build/release/bin/gx_headless.exe --sandbox --minutes 480 --salvagers 1 --company-credits 20000   # pecios
 
 ./build/release/bin/gx_headless.exe --help
 ```
@@ -150,13 +156,14 @@ con `gx_game.exe --seed 1 --fly-to 1 --prerun-hours 0.0745 --engage-nearest --zo
 ```text
 Engine/        Core, Memory, Math, Jobs, Time, Profiling, Serialization
 Simulation/    Kernel (scheduler, paso, save/load), World (entidades), Events, Commands, Economy
-Space/         Orbits (Kepler), Bodies, Ships (vuelo, autopiloto, módulos), Sensors, Combat, Generation
+Space/         Orbits (Kepler), Bodies, Ships (vuelo, autopiloto, módulos), Sensors, Combat, Destruction,
+               Generation
 Game/          Sandbox (escenario jugable, empresa y flota del jugador, contenido provisional), Presentation
 Scenarios/     cargas sintéticas para tests y benchmarks (no contenido de juego)
 Apps/          gx_game (cliente SDL3 + ImGui), gx_headless
 ThirdParty/    SDL3 y Dear ImGui (FetchContent con hash)
 Benchmarks/    gx_bench
-Tests/         gx_tests (20 suites en CTest)
+Tests/         gx_tests (21 suites en CTest)
 docs/          DESIGN.md, ARCHITECTURE.md, DECISIONS.md, BENCHMARKS.md
 cmake/ scripts/ tools/
 ```

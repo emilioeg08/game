@@ -7,11 +7,13 @@
 #include "Engine/Time/SimTime.h"
 #include "Game/Sandbox/Contracts.h"
 #include "Game/Sandbox/Fleet.h"
+#include "Game/Sandbox/Wrecks.h"
 #include "Simulation/Economy/Economy.h"
 #include "Simulation/Economy/Finance.h"
 #include "Simulation/Kernel/SystemScheduler.h"
 #include "Simulation/World/EntityRegistry.h"
 #include "Space/Combat/Combat.h"
+#include "Space/Destruction/Debris.h"
 #include "Space/Sensors/Sensors.h"
 #include "Space/Ships/Flight.h"
 #include "Space/Ships/Ship.h"
@@ -298,6 +300,11 @@ struct SandboxStats {
     i64 capitalOut = 0; // equity taken out by owners who left
     i64 shipyardPaid = 0;
     i64 premiumsPaid = 0;
+    // Destruction (ADR-039).
+    u64 wrecksFormed = 0;
+    u64 scrapCreated = 0;   // tonnes of metals in the wrecks (goods entering the system)
+    u64 tonnesSalvaged = 0; // taken from wrecks, by anybody
+    u64 debrisHits = 0;
 
     template <typename Archive>
     void io(Archive& ar) {
@@ -348,6 +355,10 @@ struct SandboxStats {
         ar.io("capitalOut", capitalOut);
         ar.io("shipyardPaid", shipyardPaid);
         ar.io("premiumsPaid", premiumsPaid);
+        ar.io("wrecksFormed", wrecksFormed);
+        ar.io("scrapCreated", scrapCreated);
+        ar.io("tonnesSalvaged", tonnesSalvaged);
+        ar.io("debrisHits", debrisHits);
     }
 };
 
@@ -449,6 +460,7 @@ public:
     [[nodiscard]] const CompanyBooks& company() const { return m_company; }
     [[nodiscard]] Wallet& account() { return m_company.account; }
     [[nodiscard]] const std::vector<EntityId>& fields() const { return m_fields; }
+    [[nodiscard]] const std::vector<DebrisCloud>& debris() const { return m_debris; }
     [[nodiscard]] bool isPlayerShip(const World& world, EntityId ship) const;
     // What the company's hulls are worth, and what the bank lends against them (the borrowing base).
     [[nodiscard]] i64 fleetValue(const World& world) const;
@@ -532,6 +544,18 @@ private:
     void fleetMine(World& world, EntityId ship, FleetBrain& brain, SimTime now);
     void fleetTrade(World& world, EntityId ship, FleetBrain& brain, SimTime now, u64 worldSeed);
     void fleetEscort(World& world, EntityId ship, FleetBrain& brain, SimTime now);
+    void fleetSalvage(World& world, EntityId ship, FleetBrain& brain, SimTime now);
+    // Wrecks (Game/Sandbox/SandboxWrecks.cpp, ADR-039).
+    void breakUpShip(World& world, const ShipDestroyed& event, SimTime now);
+    void updateWrecks(const TickContext& context);
+    // Wrecks gone (drifted away or emptied): structural, in Game.Upkeep.
+    void removeWrecks(World& world, SimTime now);
+    void onSalvageCommand(const SalvageCommand& command, const TickContext& context);
+    // Moves what fits of a wreck's hold into the ship's; returns the tonnes taken.
+    u32 salvage(World& world, EntityId ship, EntityId wreck, SimTime now);
+    // The nearest wreck with something left that the player's faction knows (invalid if none).
+    [[nodiscard]] EntityId nearestKnownWreck(const World& world, const Vec3d& position,
+                                             EntityId except = {}) const;
     // Sends a company ship to `target` (a body or a ship) and marks it travelling.
     void sendTo(World& world, EntityId ship, FleetBrain& brain, EntityId target);
     void onBoardCommand(const BoardCommand& command, const TickContext& context);
@@ -625,6 +649,7 @@ private:
     std::vector<PortDanger> m_danger;
     std::vector<f64> m_initialStock;
     CompanyBooks m_company;
+    std::vector<DebrisCloud> m_debris;
     // Derived from the World (rebuilt after loading, or on every Game.Haulers / Game.Fleet run).
     std::vector<Delivery> m_inflight;      // cargo the traders' ships are carrying to each port
     std::vector<Delivery> m_fleetInflight; // and the company's

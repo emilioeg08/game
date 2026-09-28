@@ -50,6 +50,7 @@ public:
         bool demoFleet = false;
         std::string fleetTab; // "fleet", "books" or "yards"
         bool selectField = false;
+        bool selectWreck = false; // the known wreck nearest to the player's ship
     };
 
     GameApp();
@@ -139,6 +140,7 @@ private:
     // The player's mining lasers (in the ship panel), and what a selected field holds.
     void drawMiningSection(const ShipView& ship);
     void drawFieldSelection(EntityId field);
+    void drawWreckSelection(const WreckView& wreck);
 
     [[nodiscard]] Simulation& simulation() { return m_session->simulation; }
     [[nodiscard]] Sandbox& sandbox() { return m_session->sandbox; }

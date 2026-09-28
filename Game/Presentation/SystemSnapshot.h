@@ -157,6 +157,27 @@ struct FleetShipView {
     bool armed = false;
 };
 
+// A wreck the player's faction knows about (every wreck when debugging).
+struct WreckView {
+    EntityId id;
+    std::string_view name; // of the ship it was
+    u32 shipClass = 0;
+    Vec3d position;
+    Vec3d velocity;
+    u32 tonnes = 0;
+    std::vector<CargoItem> contents;
+    f64 expiresIn = 0.0; // s
+    bool hulk = false;
+    bool known = true; // false: debug truth only
+};
+
+// A debris cloud, drawn where the player can see explosions.
+struct DebrisView {
+    Vec3d center;
+    f64 radius = 0.0;
+    f64 density = 0.0;
+};
+
 // The company's books as the player sees them.
 struct CompanyView {
     i64 account = 0;
@@ -203,6 +224,8 @@ struct SystemSnapshot {
     CompanyView company;
     std::vector<FleetShipView> fleet;
     std::vector<DepositView> deposits;
+    std::vector<WreckView> wrecks;
+    std::vector<DebrisView> debris;
     bool playerCanMine = false; // the player's ship has mining lasers
     bool playerMining = false;
     EntityId playerMiningField;
@@ -215,6 +238,7 @@ struct SystemSnapshot {
     [[nodiscard]] const KnownPricesView* findKnownPrices(EntityId port) const;
     [[nodiscard]] const FleetShipView* findFleetShip(EntityId id) const;
     [[nodiscard]] const DepositView* findDeposit(EntityId field) const;
+    [[nodiscard]] const WreckView* findWreck(EntityId id) const;
     // Position of a body or ship in this snapshot.
     [[nodiscard]] bool positionOf(EntityId id, Vec3d& out) const;
 };

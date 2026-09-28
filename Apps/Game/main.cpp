@@ -4,7 +4,7 @@
 //   gx_game [--seed <n>] [--frames <n> --screenshot <file.png>] [--prerun-hours <h>] [--zoom <m/px>]
 //           [--follow-star] [--select] [--select-port <i>] [--truth] [--fly-to <port index>]
 //           [--engage-nearest] [--data-dir <folder>] [--menu main|pause|options]
-//           [--demo-fleet] [--fleet-tab fleet|books|yards] [--select-field]
+//           [--demo-fleet] [--fleet-tab fleet|books|yards] [--select-field] [--select-wreck]
 //
 // On Windows the release build is a GUI program (no console): SDL_main.h supplies the WinMain entry point
 // and hands main() its arguments in UTF-8.
@@ -69,6 +69,8 @@ int main(int argc, char** argv) {
             ok = options.fleetTab == "fleet" || options.fleetTab == "books" || options.fleetTab == "yards";
         } else if (arg == "--select-field") {
             options.selectField = true;
+        } else if (arg == "--select-wreck") {
+            options.selectWreck = true;
         } else if (arg == "--data-dir") {
             options.dataDir = std::string(value());
             ok = !options.dataDir.empty();

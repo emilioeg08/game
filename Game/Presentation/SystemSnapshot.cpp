@@ -57,6 +57,12 @@ const DepositView* SystemSnapshot::findDeposit(EntityId field) const {
     return it == deposits.end() ? nullptr : &*it;
 }
 
+const WreckView* SystemSnapshot::findWreck(EntityId id) const {
+    const auto it =
+        std::find_if(wrecks.begin(), wrecks.end(), [id](const WreckView& w) { return w.id == id; });
+    return it == wrecks.end() ? nullptr : &*it;
+}
+
 bool SystemSnapshot::positionOf(EntityId id, Vec3d& out) const {
     if (const ShipView* ship = findShip(id)) {
         out = ship->position;
@@ -64,6 +70,10 @@ bool SystemSnapshot::positionOf(EntityId id, Vec3d& out) const {
     }
     if (const BodyView* body = findBody(id)) {
         out = body->position;
+        return true;
+    }
+    if (const WreckView* wreck = findWreck(id)) {
+        out = wreck->position;
         return true;
     }
     return false;
@@ -105,6 +115,8 @@ void SnapshotBuilder::build(const Simulation& simulation, const Sandbox& sandbox
     out.knownPrices.clear();
     out.fleet.clear();
     out.deposits.clear();
+    out.wrecks.clear();
+    out.debris.clear();
     out.playerCanMine = false;
     out.playerMining = false;
     out.playerMiningField = {};
@@ -255,6 +267,23 @@ void SnapshotBuilder::build(const Simulation& simulation, const Sandbox& sandbox
         }
         view.armed = world.components<CombatControl>().contains(id);
         out.fleet.push_back(view);
+    }
+    const ComponentStore<Wreck>& wrecks = world.components<Wreck>();
+    for (usize i = 0; i < wrecks.size(); ++i) {
+        const EntityId id = wrecks.entities()[i];
+        const Wreck& wreck = wrecks.values()[i];
+        const Kinematics* state = kinematics.tryGet(id);
+        const CargoHold* hold = world.components<CargoHold>().tryGet(id);
+        if (state == nullptr || hold == nullptr) {
+            continue;
+        }
+        out.wrecks.push_back({id, wreck.name, wreck.shipClass,
+                              state->position + state->velocity * sinceFlight, state->velocity, hold->used(),
+                              hold->items, (wreck.expires - now).toSeconds(), wreck.hulk,
+                              wreck.knownTo(content::kFactionPlayer)});
+    }
+    for (const DebrisCloud& cloud : sandbox.debris()) {
+        out.debris.push_back({cloud.centerAt(now), debrisRadius(cloud, now), debrisDensity(cloud, now)});
     }
     const ComponentStore<Deposit>& deposits = world.components<Deposit>();
     for (usize i = 0; i < deposits.size(); ++i) {

@@ -113,6 +113,7 @@ void Sandbox::install(Simulation& simulation) {
     world.registerComponent<MiningControl>("Game.MiningControl");
     world.registerComponent<OwnedShip>("Game.OwnedShip");
     world.registerComponent<FleetBrain>("Game.FleetBrain");
+    world.registerComponent<Wreck>("Game.Wreck");
 
     EventBus& events = simulation.events();
     events.channel<ShipArrived>().subscribe(
@@ -170,6 +171,10 @@ void Sandbox::install(Simulation& simulation) {
         "Game.Flagship", [this](const FlagshipCommand& command, const TickContext& context) {
             onFlagshipCommand(command, context);
         });
+    commands.registerCommand<SalvageCommand>(
+        "Game.Salvage", [this](const SalvageCommand& command, const TickContext& context) {
+            onSalvageCommand(command, context);
+        });
     commands.registerCommand<LoanCommand>(
         "Game.Loan",
         [this](const LoanCommand& command, const TickContext& context) { onLoanCommand(command, context); });
@@ -221,6 +226,12 @@ void Sandbox::install(Simulation& simulation) {
     m_sensors.install(simulation, m_config.sensorScanPeriod);
     m_combat.setWeapons(content::weaponTable());
     m_combat.install(simulation, m_sensors, m_config.strategicFlightPeriod);
+    // Wrecks drift and debris strikes whoever crosses it fast (hits go through combat, before its cleanup).
+    simulation.addSystem({"Game.Wrecks",
+                          TickPhase::Simulation,
+                          SimDuration::seconds(1),
+                          {},
+                          [this](const TickContext& context) { updateWrecks(context); }});
     m_economy.setGoods(content::goodTable());
     m_economy.install(simulation, m_config.economyPeriod);
     // Repairs, respawns and departures of raiders: structural changes, so after the event subscribers.
@@ -1081,6 +1092,8 @@ void Sandbox::updateUpkeep(const TickContext& context) {
         }
     }
 
+    removeWrecks(world, now);
+
     // Raiders that made it out of the system leave the simulation.
     std::vector<EntityId> departed;
     const ComponentStore<PirateBrain>& pirates = world.components<PirateBrain>();
@@ -1206,7 +1219,7 @@ void Sandbox::onHyperspaceTransition(const HyperspaceTransition& event, const Ti
 void Sandbox::onShipDamaged(const ShipDamaged& event, const TickContext& context) {
     World& world = context.world;
     const ShipIdentity* victim = world.components<ShipIdentity>().tryGet(event.ship);
-    if (victim != nullptr && victim->faction == content::kFactionIndependent) {
+    if (victim != nullptr && victim->faction == content::kFactionIndependent && event.attacker.isValid()) {
         // A trader under fire knows where it is: it calls for help (one call per incident).
         const Vec3d where = world.components<Kinematics>().get(event.ship).position;
         const bool known = std::any_of(m_distress.begin(), m_distress.end(), [&](const DistressCall& call) {
@@ -1235,7 +1248,10 @@ void Sandbox::onShipDamaged(const ShipDamaged& event, const TickContext& context
     }
     if (event.ship == m_player) {
         if (context.now - m_lastPlayerHit > kHitJournalGap) {
-            addJournal(context.now, msg("¡Impacto! La nave está bajo fuego."));
+            addJournal(context.now,
+                       event.attacker.isValid()
+                           ? msg("¡Impacto! La nave está bajo fuego.")
+                           : msg("¡Impacto de escombros! Cruzas una nube de restos demasiado rápido."));
         }
         m_lastPlayerHit = context.now;
         m_combatAlertUntil = context.now + m_config.combatAlert;
@@ -1286,12 +1302,8 @@ void Sandbox::onShipDestroyed(const ShipDestroyed& event, const TickContext& con
     const SimTime now = context.now;
     onTraderLost(context.world, event.ship, now); // the insurance pays before the ship leaves the World
     onCompanyShipLost(context.world, event.ship, now);
-    if (const CargoHold* hold = world.components<CargoHold>().tryGet(event.ship)) {
-        m_stats.cargoLost.resize(std::max<usize>(m_stats.cargoLost.size(), content::kGoodCount), 0);
-        for (const CargoItem& item : hold->items) {
-            m_stats.cargoLost[item.good] += item.tonnes; // the supply chain loses it for good
-        }
-    }
+    // It breaks up: part of its cargo and the scrap of its intact modules drift away as wrecks.
+    breakUpShip(context.world, event, now);
     if (const HaulerBrain* brain = world.components<HaulerBrain>().tryGet(event.ship)) {
         // The traders remember where they were heading: that route is dangerous for a while.
         const ShipControl& control = world.components<ShipControl>().get(event.ship);
@@ -1968,6 +1980,7 @@ void Sandbox::writeState(BinaryWriter& writer) const {
     writer.io(m_journal);
     writer.io(m_stats);
     writer.io(m_company);
+    writer.io(m_debris);
     writer.io(m_treasury);
     writer.io(m_reputation);
     writer.io(m_offenses);
@@ -2000,6 +2013,7 @@ void Sandbox::readState(BinaryReader& reader) {
     reader.io(m_journal);
     reader.io(m_stats);
     reader.io(m_company);
+    reader.io(m_debris);
     reader.io(m_treasury);
     reader.io(m_reputation);
     reader.io(m_offenses);

@@ -434,7 +434,9 @@ GX_TEST(Sandbox, GoodsAreConservedThroughTradeAndLosses) {
     const SandboxStats& stats = session.sandbox.stats();
     for (GoodId good = 0; good < content::kGoodCount; ++good) {
         const f64 lost = static_cast<f64>(stats.cargoLost[good]);
-        GX_EXPECT_NEAR(session.sandbox.initialStock()[good] + now.produced[good] - now.consumed[good] - lost,
+        const f64 scrap = good == content::kGoodMetals ? static_cast<f64>(stats.scrapCreated) : 0.0;
+        GX_EXPECT_NEAR(session.sandbox.initialStock()[good] + now.produced[good] + scrap -
+                           now.consumed[good] - lost,
                        now.stock[good] + now.cargo[good], 1e-6);
     }
     GX_EXPECT(stats.haulerTrades > 0);

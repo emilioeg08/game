@@ -155,6 +155,11 @@ public:
     [[nodiscard]] const std::vector<BeamShot>& recentBeams() const { return m_beams; }
     [[nodiscard]] const std::vector<Explosion>& recentExplosions() const { return m_explosions; }
     [[nodiscard]] const CombatStats& stats() const { return m_stats; }
+    // Damage from outside the weapons (debris, collisions), through the same path as a hit: module damage,
+    // ShipDamaged and, if it breaks, ShipDestroyed and removal at cleanup. Call in the Simulation phase.
+    void applyHit(const TickContext& context, EntityId target, EntityId source, f64 damage, u64 salt) {
+        hit(context, target, source, damage, salt | (1ull << 63));
+    }
     // Fire-control state of a ship's weapons towards its current target (for its owner's UI).
     [[nodiscard]] FireSolution fireSolution(const World& world, EntityId ship, u32 weapon) const;
 

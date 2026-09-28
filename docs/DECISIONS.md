@@ -674,3 +674,44 @@ sustituya y explique por qué.
 - **Consecuencias:** hay otra fuente de mineral y agua que compite con los planetas, y otra presa para los
   corsarios. El equilibrio de las Escoltas depende de las pérdidas que evitan. Pendiente: mineros NPC,
   materiales raros y yacimientos en lunas.
+
+## ADR-039 — Destrucción localizada: fragmentos, pecios, escombros y salvamento
+
+- **Contexto:** GDD §10 (objetos destruibles, destrucción localizada, escombros) y fase 8 del roadmap. Hasta
+  M4 una nave destruida desaparecía y toda su carga se perdía.
+- **Decisión:**
+  - **Fragmentación por módulos** (`Space/Destruction/Debris.h`, funciones puras). Al destruirse, la nave se
+    parte así:
+    - El casco se queda la estructura y el mayor módulo intacto.
+    - Los demás módulos intactos se reparten en hasta 4 fragmentos, que la explosión separa a 50–400 m/s.
+    - Cada módulo intacto deja 0,01 t de chatarra por punto de salud, y la estructura, la mitad.
+    - Los módulos destruidos en el combate se vaporizan.
+    - Sobrevive la mitad de la carga, repartida por tamaño, y una cuarta parte si el reactor estalla. En ese
+      caso también queda la mitad de la chatarra.
+  - **Pecios** (`Wreck`, `Game/Sandbox/SandboxWrecks.cpp`). Cada pieza con algo dentro es una entidad con
+    `Kinematics`, una bodega con lo que sobrevivió más la chatarra (metales) y un `ShipControl` en deriva.
+    - Derivan con el sistema de vuelo. La primera versión los movía a saltos de un segundo y el autopiloto
+      de quien iba a por ellos nunca llegaba a estabilizarse.
+    - A las 3 horas quedan fuera de alcance y lo que conserven se pierde.
+    - La chatarra entra en el balance de conservación como metal que llega con los cascos.
+  - **Niebla de guerra.** Un pecio lo conocen su bando, quien lo destruyó y cada facción que lo tenía en su
+    imagen de sensores. La empresa, además, descubre los que pasan a menos de 50.000 km de sus naves.
+  - **Escombros.** Cada destrucción deja una nube que se expande (20 m/s, hasta 30 km) y se aclara en 30
+    minutos.
+    - Quien la cruza a más de 1 km/s relativo recibe impactos de Poisson: 0,1 por km recorrido dentro, por
+      la densidad y por el tamaño de la nave destruida.
+    - El daño crece con la velocidad (hasta ×5).
+    - La trayectoria se calcula en el marco de la nube, y los impactos pasan por el mismo camino que los de
+      las armas (`CombatSystem::applyHit`).
+    - Quien iguala la velocidad de la nube (un salvador) está a salvo.
+  - **Salvamento.** A mano, con `SalvageCommand`: cualquier nave con bodega, a menos de 5 km y con la
+    velocidad del pecio. Para la flota hay una orden permanente, Recuperar restos: ir al pecio conocido más
+    cercano que no tenga ya otro salvador en camino, llenar la bodega, vender lo más valioso donde más rinda
+    el ciclo y repetir.
+- **Medido** (8 h, 3 piratas, `docs/BENCHMARKS.md`):
+  - Se forman de 3 a 56 pecios por partida, con 14–215 t de chatarra.
+  - Las nubes rara vez se cruzan deprisa (0–1 impactos), porque los combates ocurren a cientos de km. Es la
+    escala física, y un piloto que se lance a un campo de batalla sí lo nota.
+  - Un Carguero salvador da de −4.000 a +22.000 cr según dónde caen las naves: un negocio de guerra.
+- **Consecuencias:** la guerra deja rastro y parte de lo perdido vuelve a la economía. Pendiente: piratas
+  carroñeros, pecios de estaciones y colisiones entre naves.

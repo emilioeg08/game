@@ -530,6 +530,24 @@ compra):
   tonelaje y de +1.600 a +2.300 cr en dos semillas. La semilla 99 es una guerra perdida de todos modos: la
   refinería se queda sin mineral y los comerciantes entregan un 60 % menos.
 
+## Destrucción, pecios y salvamento (ADR-039)
+
+- **Una nave destruida se parte por sus módulos.** El casco conserva la estructura y el mayor módulo intacto,
+  y los demás módulos intactos salen despedidos en hasta 4 fragmentos (a 50–400 m/s).
+  - Los módulos destruidos en el combate se vaporizan. Los intactos dejan chatarra: 0,01 t de metales por
+    punto de salud.
+  - De la carga sobrevive la mitad (la cuarta parte si estalla el reactor).
+- **Pecios:** derivan con la velocidad de la nave y se pierden de vista a las 3 horas. Solo se ven los que tu
+  facción vio caer o los que tus naves encuentran a menos de 50.000 km. En el mapa son cruces grises; al
+  seleccionarlos se ve su contenido.
+- **Salvamento:**
+  - Con cualquier nave con bodega, a menos de 5 km y con la velocidad del pecio: botón **Recuperar**.
+  - Para la flota, la orden **Recuperar restos**: va al pecio conocido más cercano, llena la bodega, vende
+    donde más rinde el ciclo y repite.
+- **Escombros:** cada explosión deja una nube que se expande (hasta 30 km) y se aclara en 30 minutos. Quien
+  la cruza a más de 1 km/s recibe impactos en proporción a lo que recorre dentro; quien va despacio (un
+  salvador) no.
+
 ## Facciones y personajes (mínimo)
 
 - **Jugador** (verde; su flota, en azul claro), **Transportistas independientes** (azul) y **Piratas**
@@ -584,6 +602,7 @@ compra):
 | Contratos | K (se aceptan atracado en una estación) |
 | Flota y empresa: naves, órdenes, cuentas, crédito, astillero | L |
 | Minar (con un Minero, dentro de un campo y parado) | botón Minar en el panel Nave |
+| Recuperar un pecio (a < 5 km, con su velocidad) | botón Recuperar en la selección del pecio |
 | Pausa / velocidad | Espacio / 1 (×1), 2 (×3), 3 (×10), 4 (×30) |
 | Seguir tu nave / la selección | H / F |
 | Guardar / cargar | F5 / F9 (en `%APPDATA%\GalaxyEngine\Sandbox\saves`) |
