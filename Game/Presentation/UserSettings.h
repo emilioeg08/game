@@ -19,6 +19,7 @@ struct UserSettings {
     bool vsync = true;
     f32 uiScale = 1.0f; // on top of the display's own scale
     bool showHelpOnStart = true;
+    std::string language = "auto"; // "auto" (the system's), "es" or a catalog in data/lang (ADR-036)
 
     friend bool operator==(const UserSettings&, const UserSettings&) = default;
 };

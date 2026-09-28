@@ -6,6 +6,7 @@
 #include "Engine/Core/Platform.h"
 #include "Engine/Profiling/Profiler.h"
 #include "Engine/Serialization/SaveFile.h"
+#include "Engine/Text/Localization.h"
 #include "Engine/Time/Stopwatch.h"
 #include "Game/Sandbox/Content.h"
 #include "Space/Bodies/CelestialBody.h"
@@ -19,6 +20,8 @@
 #include <array>
 #include <filesystem>
 #include <format>
+#include <fstream>
+#include <iterator>
 
 namespace gx {
 namespace {
@@ -114,9 +117,11 @@ bool GameApp::initPlatform(const Options& options) {
     }
     if (!initDataDirectory(options.dataDir)) {
         SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "GalaxyEngine",
-                                 "No se puede crear la carpeta de datos del usuario.", nullptr);
+                                 tr("No se puede crear la carpeta de datos del usuario."), nullptr);
         return false;
     }
+    scanLanguages();
+    applyLanguage();
     float scale = SDL_GetDisplayContentScale(SDL_GetPrimaryDisplay());
     if (scale <= 0.0f) {
         scale = 1.0f;
@@ -344,8 +349,8 @@ int GameApp::run(const Options& options) {
         }
         if (playing && !m_snapshot.playerAlive) {
             const ImVec2 display = ImGui::GetIO().DisplaySize;
-            const std::string text = std::format("NAVE DESTRUIDA  ·  una nave nueva te espera en {:.0f} s",
-                                                 m_snapshot.playerRespawnIn);
+            const std::string text =
+                trf("NAVE DESTRUIDA  ·  una nave nueva te espera en {:.0f} s", m_snapshot.playerRespawnIn);
             ImGui::GetForegroundDrawList()->AddText({display.x * 0.5f - 170.0f, display.y * 0.5f - 60.0f},
                                                     IM_COL32(255, 90, 80, 255), text.c_str());
         }
@@ -398,7 +403,7 @@ void GameApp::newGame() {
     m_map.camera().follow = sandbox().playerShip();
     m_map.camera().metersPerPixel = 30'000.0;
     resetTimeController();
-    setStatus(std::format("Nueva partida: sistema {} (semilla {})", sandbox().systemName(), m_config.seed));
+    setStatus(trf("Nueva partida: sistema {} (semilla {})", sandbox().systemName(), m_config.seed));
 }
 
 void GameApp::toggleFullscreen() {
@@ -418,6 +423,84 @@ void GameApp::applySettings() {
     }
 }
 
+namespace {
+
+std::filesystem::path languageDirectory() {
+    const char* base = SDL_GetBasePath(); // owned by SDL
+    return (base != nullptr ? pathFromUtf8(base) : std::filesystem::current_path()) / "data" / "lang";
+}
+
+} // namespace
+
+void GameApp::scanLanguages() {
+    m_languages = {{"es", "Español"}};
+    std::error_code ec;
+    for (const auto& entry : std::filesystem::directory_iterator(languageDirectory(), ec)) {
+        if (entry.path().extension() != ".po") {
+            continue;
+        }
+        std::ifstream in(entry.path(), std::ios::binary);
+        const std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+        Catalog catalog;
+        std::string error;
+        if (catalog.loadPo(text, error)) {
+            const std::string code = pathToUtf8(entry.path().stem());
+            m_languages.push_back({code, catalog.languageName().empty() ? code : catalog.languageName()});
+        }
+    }
+    std::sort(m_languages.begin() + 1, m_languages.end(),
+              [](const LanguageOption& a, const LanguageOption& b) { return a.code < b.code; });
+}
+
+std::string GameApp::resolveLanguage() const {
+    const auto available = [&](std::string_view code) {
+        return std::any_of(m_languages.begin(), m_languages.end(),
+                           [&](const LanguageOption& language) { return language.code == code; });
+    };
+    if (m_settings.language != "auto") {
+        return available(m_settings.language) ? m_settings.language : std::string("es");
+    }
+    // The system's preferred languages, in order; Spanish speakers get the source, everyone else English.
+    std::string chosen = available("en") ? "en" : "es";
+    int count = 0;
+    if (SDL_Locale** locales = SDL_GetPreferredLocales(&count)) {
+        for (int i = 0; i < count; ++i) {
+            const std::string code = locales[i]->language != nullptr ? locales[i]->language : "";
+            if (code == "es" || available(code)) {
+                chosen = code;
+                break;
+            }
+        }
+        SDL_free(locales);
+    }
+    return chosen;
+}
+
+void GameApp::applyLanguage() {
+    const std::string code = resolveLanguage();
+    setActiveCatalog(nullptr);
+    m_catalog = Catalog{};
+    if (code == "es") {
+        GX_LOG_INFO(kChannel, "language: es (source)");
+        return;
+    }
+    const std::filesystem::path path = languageDirectory() / (code + ".po");
+    std::ifstream in(path, std::ios::binary);
+    const std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    std::string error;
+    if (!in || !m_catalog.loadPo(text, error)) {
+        GX_LOG_WARN(kChannel, "cannot load {}: {}", pathToUtf8(path), error);
+        m_catalog = Catalog{};
+        return;
+    }
+    for (const Catalog::Rejected& rejected : m_catalog.rejected()) {
+        GX_LOG_WARN(kChannel, "{}: translation of '{}' rejected (placeholders differ)", code,
+                    rejected.source);
+    }
+    setActiveCatalog(&m_catalog);
+    GX_LOG_INFO(kChannel, "language: {} ({} texts)", code, m_catalog.size());
+}
+
 void GameApp::saveSettings() {
     std::string error;
     if (!saveUserSettings(m_dataDir / "settings.ini", m_settings, error)) {
@@ -434,10 +517,10 @@ void GameApp::quickSave() {
                                                 formatSimTime(simulation().now(), content::kEpochYear));
     std::string error;
     if (writeSaveFile(path, GX_VERSION, description, payload, error)) {
-        setStatus(std::format("Partida guardada en {} ({:.1f} KiB)", pathToUtf8(path),
-                              static_cast<f64>(payload.size()) / 1024.0));
+        setStatus(trf("Partida guardada en {} ({:.1f} KiB)", pathToUtf8(path),
+                      static_cast<f64>(payload.size()) / 1024.0));
     } else {
-        setStatus("Error al guardar: " + error);
+        setStatus(trf("Error al guardar: {}", error));
     }
 }
 
@@ -445,13 +528,13 @@ bool GameApp::quickLoad() {
     SaveFileContents contents;
     std::string error;
     if (!readSaveFile(m_dataDir / kSaveDirectory / kQuickSaveFile, contents, error)) {
-        setStatus("No se pudo cargar: " + error);
+        setStatus(trf("No se pudo cargar: {}", error));
         return false;
     }
     // Load into a fresh session and swap only on success: a failed load leaves the current game untouched.
     auto loaded = std::make_unique<Session>(m_jobs, m_config);
     if (!loaded->simulation.loadState(contents.payload, error)) {
-        setStatus("Partida incompatible: " + error);
+        setStatus(trf("Partida incompatible: {}", error));
         return false;
     }
     m_session = std::move(loaded);
@@ -464,7 +547,7 @@ bool GameApp::quickLoad() {
     m_map.camera().follow = sandbox().playerShip();
     resetTimeController();
     m_config.seed = sandbox().config().seed; // the loaded game's
-    setStatus(std::format("Partida cargada: {}", contents.info.description));
+    setStatus(trf("Partida cargada: {}", contents.info.description));
     return true;
 }
 
@@ -632,7 +715,7 @@ std::string GameApp::nameOf(EntityId entity) const {
         return std::string(ship->name);
     }
     if (const BodyView* body = m_snapshot.findBody(entity)) {
-        return std::string(body->name);
+        return localizedName(body->name);
     }
     return entity.isValid() ? std::format("#{}", entity.index) : std::string("-");
 }
@@ -651,8 +734,8 @@ void GameApp::drawTimeBar() {
                      ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoFocusOnAppearing |
                      ImGuiWindowFlags_NoNav);
     const std::string date = formatSimTime(simulation().now(), content::kEpochYear);
-    ImGui::Text("Sistema %s   |   %s", sandbox().systemName().c_str(), date.c_str());
-    if (ImGui::Button(m_paused ? "Reanudar" : "  Pausa  ")) {
+    ImGui::Text(tr("Sistema %s   |   %s"), sandbox().systemName().c_str(), date.c_str());
+    if (ImGui::Button(m_paused ? tr("Reanudar") : tr("  Pausa  "))) {
         m_paused = !m_paused;
     }
     for (usize i = 0; i < kSpeeds.size(); ++i) {
@@ -672,11 +755,11 @@ void GameApp::drawTimeBar() {
     ImGui::SameLine();
     const f64 requested = m_paused ? 0.0 : static_cast<f64>(kSpeeds[m_speedIndex]);
     if (m_effectiveSpeed < 0.0) {
-        ImGui::TextDisabled("real —"); // not measured yet
+        ImGui::TextDisabled("%s", tr("real —")); // not measured yet
     } else if (!m_paused && m_effectiveSpeed < requested * 0.9) {
-        ImGui::TextColored(color(255, 170, 80), "real x%.0f (limitado por CPU)", m_effectiveSpeed);
+        ImGui::TextColored(color(255, 170, 80), tr("real x%.0f (limitado por CPU)"), m_effectiveSpeed);
     } else {
-        ImGui::TextDisabled("real x%.0f", m_effectiveSpeed);
+        ImGui::TextDisabled(tr("real x%.0f"), m_effectiveSpeed);
     }
     ImGui::End();
 }
@@ -685,81 +768,81 @@ void GameApp::drawShipPanel() {
     const ImVec2 display = ImGui::GetIO().DisplaySize;
     ImGui::SetNextWindowPos({10.0f, 90.0f}, ImGuiCond_FirstUseEver);
     ImGui::SetNextWindowSize({330.0f, display.y * 0.55f}, ImGuiCond_FirstUseEver);
-    ImGui::Begin("Nave");
+    ImGui::Begin(tr("Nave"));
     const ShipView* ship = m_snapshot.findShip(sandbox().playerShip());
     if (ship == nullptr) {
-        ImGui::TextColored(color(255, 110, 100), "Tu nave ha sido destruida.");
-        ImGui::TextDisabled("Una nave nueva te espera en %s dentro de %.0f s.",
+        ImGui::TextColored(color(255, 110, 100), "%s", tr("Tu nave ha sido destruida."));
+        ImGui::TextDisabled(tr("Una nave nueva te espera en %s dentro de %.0f s."),
                             nameOf(sandbox().homePort()).c_str(), m_snapshot.playerRespawnIn);
         ImGui::End();
         return;
     }
     ImGui::Text("%.*s", static_cast<int>(ship->name.size()), ship->name.data());
     ImGui::SameLine();
-    ImGui::TextDisabled("(%s)", content::kShipClasses[ship->shipClass].name);
+    ImGui::TextDisabled("(%s)", tr(content::kShipClasses[ship->shipClass].name));
     u32 cargoUsed = 0;
     std::string cargo;
     for (const CargoItem& item : m_snapshot.playerCargo) {
         cargoUsed += item.tonnes;
         cargo += std::format("{}{} t {}", cargo.empty() ? "" : ", ", item.tonnes,
-                             sandbox().economy().goods()[item.good].name);
+                             tr(std::string_view(sandbox().economy().goods()[item.good].name)));
     }
-    ImGui::Text("Créditos: %lld cr   ·   Bodega: %u / %u t", static_cast<long long>(m_snapshot.playerCredits),
-                cargoUsed, m_snapshot.playerCargoCapacity);
+    ImGui::Text(tr("Créditos: %lld cr   ·   Bodega: %u / %u t"),
+                static_cast<long long>(m_snapshot.playerCredits), cargoUsed, m_snapshot.playerCargoCapacity);
     if (!cargo.empty()) {
-        ImGui::TextDisabled("Carga: %s", cargo.c_str());
+        ImGui::TextDisabled(tr("Carga: %s"), cargo.c_str());
     }
     const f64 reputation = m_snapshot.playerReputation;
-    const char* standing = m_snapshot.playerHostile ? "hostil: la Autoridad te busca"
-                           : reputation <= -10.0    ? "sospechosa"
-                           : reputation >= 20.0     ? "respetada"
-                                                    : "neutral";
+    const char* standing = m_snapshot.playerHostile ? tr("hostil: la Autoridad te busca")
+                           : reputation <= -10.0    ? tr("sospechosa")
+                           : reputation >= 20.0     ? tr("respetada")
+                                                    : tr("neutral");
     ImGui::TextColored(m_snapshot.playerHostile ? color(255, 100, 90)
                        : reputation <= -10.0    ? color(230, 180, 80)
                                                 : color(170, 200, 230),
-                       "Reputación: %.0f (%s)", reputation, standing);
+                       tr("Reputación: %.0f (%s)"), reputation, standing);
     ImGui::Separator();
     const f64 acceleration = length(ship->acceleration);
-    ImGui::Text("Velocidad:    %s", formatSpeed(length(ship->velocity)).c_str());
-    ImGui::Text("Aceleración:  %.0f m/s² (%.0f g)", acceleration, acceleration / kStandardGravity);
-    ImGui::Text("Modo:         %s", displayName(ship->mode));
+    ImGui::Text(tr("Velocidad:    %s"), formatSpeed(length(ship->velocity)).c_str());
+    ImGui::Text(tr("Aceleración:  %.0f m/s² (%.0f g)"), acceleration, acceleration / kStandardGravity);
+    ImGui::Text(tr("Modo:         %s"), displayName(ship->mode));
     if (ship->phase == DrivePhase::Charging) {
-        ImGui::TextColored(color(200, 160, 255), "Motor:        cargando salto (%.1f s)",
+        ImGui::TextColored(color(200, 160, 255), tr("Motor:        cargando salto (%.1f s)"),
                            ship->chargeRemaining);
     } else {
-        ImGui::Text("Motor:        %s", displayName(ship->phase));
+        ImGui::Text(tr("Motor:        %s"), displayName(ship->phase));
     }
     if (ship->mode == FlightMode::Approach || ship->mode == FlightMode::MoveTo) {
         const std::string target =
-            ship->mode == FlightMode::Approach ? nameOf(ship->target) : "punto del espacio";
-        ImGui::Text("Destino:      %s", target.c_str());
-        ImGui::Text("Distancia:    %s",
+            ship->mode == FlightMode::Approach ? nameOf(ship->target) : std::string(tr("punto del espacio"));
+        ImGui::Text(tr("Destino:      %s"), target.c_str());
+        ImGui::Text(tr("Distancia:    %s"),
                     formatDistance(length(ship->targetPosition - ship->position)).c_str());
-        ImGui::Text("Estado:       %s", ship->arrived ? "en posición" : "en ruta");
+        ImGui::Text(tr("Estado:       %s"), ship->arrived ? tr("en posición") : tr("en ruta"));
     } else if (ship->mode == FlightMode::Pursue) {
         const ContactView* chased = m_snapshot.findContact(ship->track);
-        ImGui::Text("Persigue:     %s",
-                    chased != nullptr ? contactLabel(*chased).c_str() : "contacto perdido");
+        ImGui::Text(tr("Persigue:     %s"),
+                    chased != nullptr ? contactLabel(*chased).c_str() : tr("contacto perdido"));
         if (chased != nullptr) {
-            ImGui::Text("Distancia:    %s",
+            ImGui::Text(tr("Distancia:    %s"),
                         formatDistance(length(chased->position - ship->position)).c_str());
         }
     }
-    if (ImGui::Button("Detener (X)")) {
+    if (ImGui::Button(tr("Detener (X)"))) {
         submitPilot(FlightMode::Stop);
     }
     ImGui::SameLine();
-    if (ImGui::Button("Deriva")) {
+    if (ImGui::Button(tr("Deriva"))) {
         submitPilot(FlightMode::Coast);
     }
     ImGui::SameLine();
-    if (ImGui::Button("Seguir (H)")) {
+    if (ImGui::Button(tr("Seguir (H)"))) {
         m_map.camera().follow = ship->id;
     }
     drawCombatSection(*ship);
 
     ImGui::Separator();
-    ImGui::TextDisabled("Destinos (clic para fijar rumbo)");
+    ImGui::TextDisabled("%s", tr("Destinos (clic para fijar rumbo)"));
     ImGui::BeginChild("ports", {0.0f, 0.0f}, ImGuiChildFlags_None);
     for (const EntityId port : sandbox().ports()) {
         const BodyView* body = m_snapshot.findBody(port);
@@ -767,7 +850,7 @@ void GameApp::drawShipPanel() {
             continue;
         }
         const std::string label =
-            std::format("{}  ·  {}  ·  {}###port{}", body->name, displayName(body->kind),
+            std::format("{}  ·  {}  ·  {}###port{}", localizedName(body->name), displayName(body->kind),
                         formatDistance(length(body->position - ship->position)), port.index);
         if (ImGui::Selectable(label.c_str(), ship->target == port)) {
             submitPilot(FlightMode::Approach, port);
@@ -780,20 +863,21 @@ void GameApp::drawShipPanel() {
 void GameApp::drawCombatSection(const ShipView& ship) {
     ImGui::Separator();
     if (m_snapshot.tactical) {
-        ImGui::TextColored(color(255, 170, 80), "Modo táctico");
+        ImGui::TextColored(color(255, 170, 80), "%s", tr("Modo táctico"));
         ImGui::SameLine();
     }
     if (!ship.powered) {
-        ImGui::TextColored(color(255, 90, 80), "SIN ENERGÍA: a la deriva hasta que se repare el reactor");
+        ImGui::TextColored(color(255, 90, 80), "%s",
+                           tr("SIN ENERGÍA: a la deriva hasta que se repare el reactor"));
     } else if (ship.fireTrack != 0) {
         const ContactView* target = m_snapshot.findContact(ship.fireTrack);
-        ImGui::TextColored(color(255, 110, 100), "Fuego sobre: %s",
-                           target != nullptr ? contactLabel(*target).c_str() : "contacto perdido");
-        if (ImGui::SmallButton("Alto el fuego (C)")) {
+        ImGui::TextColored(color(255, 110, 100), tr("Fuego sobre: %s"),
+                           target != nullptr ? contactLabel(*target).c_str() : tr("contacto perdido"));
+        if (ImGui::SmallButton(tr("Alto el fuego (C)"))) {
             submitEngage(0, false, false);
         }
     } else {
-        ImGui::TextDisabled("Armas en espera");
+        ImGui::TextDisabled("%s", tr("Armas en espera"));
     }
     const std::vector<WeaponDef>& weapons = sandbox().combat().weapons();
     for (const ModuleView& module : m_snapshot.playerModules) {
@@ -806,9 +890,9 @@ void GameApp::drawCombatSection(const ShipView& ship) {
         ImGui::PopStyleColor();
         ImGui::SameLine();
         const bool isWeapon = module.type == ModuleType::Weapon && module.weapon < weapons.size();
-        const char* name = isWeapon ? weapons[module.weapon].name.c_str() : displayName(module.type);
+        const char* name = isWeapon ? tr(weapons[module.weapon].name.c_str()) : displayName(module.type);
         if (!module.functional) {
-            ImGui::TextColored(color(255, 110, 100), "%s (fuera de servicio)", name);
+            ImGui::TextColored(color(255, 110, 100), tr("%s (fuera de servicio)"), name);
             continue;
         }
         if (!isWeapon) {
@@ -819,14 +903,14 @@ void GameApp::drawCombatSection(const ShipView& ship) {
         if (!fire.hasTarget) {
             ImGui::Text("%s", name);
         } else if (!fire.inRange) {
-            ImGui::Text("%s  ·  fuera de alcance (%s)", name,
+            ImGui::Text(tr("%s  ·  fuera de alcance (%s)"), name,
                         formatDistance(weapons[module.weapon].range).c_str());
         } else if (!fire.locked) {
-            ImGui::TextColored(color(220, 170, 60), "%s  ·  sin fijación", name);
+            ImGui::TextColored(color(220, 170, 60), tr("%s  ·  sin fijación"), name);
         } else if (module.cooldown > 0.0) {
-            ImGui::TextColored(color(120, 255, 220), "%s  ·  recargando %.1f s", name, module.cooldown);
+            ImGui::TextColored(color(120, 255, 220), tr("%s  ·  recargando %.1f s"), name, module.cooldown);
         } else {
-            ImGui::TextColored(color(120, 255, 220), "%s  ·  fijado", name);
+            ImGui::TextColored(color(120, 255, 220), tr("%s  ·  fijado"), name);
         }
     }
 }
@@ -839,34 +923,37 @@ void GameApp::drawMarketWindow() {
     const ImVec2 display = ImGui::GetIO().DisplaySize;
     ImGui::SetNextWindowPos({460.0f, display.y - 20.0f}, ImGuiCond_FirstUseEver, {0.0f, 1.0f});
     ImGui::SetNextWindowSize({620.0f, 250.0f}, ImGuiCond_FirstUseEver);
-    const std::string title = std::format("Mercado · {}###market", nameOf(market->port));
+    const std::string title = trf("Mercado · {}", nameOf(market->port)) + "###market";
     ImGui::Begin(title.c_str());
-    ImGui::Text("Créditos: %lld cr", static_cast<long long>(m_snapshot.playerCredits));
+    ImGui::Text(tr("Créditos: %lld cr"), static_cast<long long>(m_snapshot.playerCredits));
     ImGui::SameLine();
     u32 used = 0;
     for (const CargoItem& item : m_snapshot.playerCargo) {
         used += item.tonnes;
     }
-    ImGui::TextDisabled("  ·  bodega %u / %u t  ·  impuesto %.0f %%", used, m_snapshot.playerCargoCapacity,
-                        content::kTradeTaxRate * 100.0);
+    ImGui::TextDisabled(tr("  ·  bodega %u / %u t  ·  impuesto %.0f %%"), used,
+                        m_snapshot.playerCargoCapacity, content::kTradeTaxRate * 100.0);
     if (m_snapshot.playerHostile) {
-        ImGui::TextColored(color(255, 100, 90),
-                           "El puerto se niega a comerciar contigo: tu reputación es hostil.");
+        ImGui::TextColored(color(255, 100, 90), "%s",
+                           tr("El puerto se niega a comerciar contigo: tu reputación es hostil."));
     }
     if (ImGui::BeginTable("market", 7, ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingStretchProp)) {
-        ImGui::TableSetupColumn("Bien");
-        ImGui::TableSetupColumn("Existencias");
-        ImGui::TableSetupColumn("Prod. / cons.");
-        ImGui::TableSetupColumn("Compra");
-        ImGui::TableSetupColumn("Venta");
-        ImGui::TableSetupColumn("Bodega");
+        ImGui::TableSetupColumn(tr("Bien"));
+        ImGui::TableSetupColumn(tr("Existencias"));
+        ImGui::TableSetupColumn(tr("Prod. / cons."));
+        ImGui::TableSetupColumn(tr("Compra"));
+        ImGui::TableSetupColumn(tr("Venta"));
+        ImGui::TableSetupColumn(tr("Bodega"));
         ImGui::TableSetupColumn("");
         ImGui::TableHeadersRow();
         for (const MarketRowView& row : market->rows) {
             ImGui::TableNextRow();
             ImGui::PushID(static_cast<int>(row.good));
             ImGui::TableNextColumn();
-            ImGui::TextUnformatted(row.name.data(), row.name.data() + row.name.size());
+            {
+                const std::string_view good = tr(row.name);
+                ImGui::TextUnformatted(good.data(), good.data() + good.size());
+            }
             ImGui::TableNextColumn();
             ImGui::Text("%.0f / %.0f t", row.stock, row.target);
             ImGui::TableNextColumn();
@@ -903,7 +990,7 @@ void GameApp::drawMarketWindow() {
                 submitTrade(row.good, -1);
             }
             ImGui::SameLine();
-            if (ImGui::SmallButton("Todo")) {
+            if (ImGui::SmallButton(tr("Todo"))) {
                 submitTrade(row.good, -static_cast<i32>(std::max<u32>(held, 1)));
             }
             ImGui::PopID();
@@ -917,7 +1004,7 @@ void GameApp::drawContractsWindow() {
     const ImVec2 display = ImGui::GetIO().DisplaySize;
     ImGui::SetNextWindowPos({display.x - 740.0f, 90.0f}, ImGuiCond_FirstUseEver);
     ImGui::SetNextWindowSize({360.0f, 300.0f}, ImGuiCond_FirstUseEver);
-    ImGui::Begin("Contratos (K)", &m_showContracts);
+    ImGui::Begin(tr("Contratos (K)"), &m_showContracts);
     const SimTime now = simulation().now();
     const auto remaining = [&](const Contract& contract) {
         return formatDuration(std::max(SimDuration{}, contract.deadline - now));
@@ -927,7 +1014,7 @@ void GameApp::drawContractsWindow() {
         simulation().world().components<CelestialBody>().tryGet(m_snapshot.dockedPort);
     const bool atStation = docked != nullptr && docked->kind == BodyKind::Station;
 
-    ImGui::TextDisabled("Tus contratos");
+    ImGui::TextDisabled("%s", tr("Tus contratos"));
     bool any = false;
     for (const Contract& contract : contracts) {
         if (contract.state != ContractState::Accepted || contract.holderFaction != content::kFactionPlayer) {
@@ -935,8 +1022,8 @@ void GameApp::drawContractsWindow() {
         }
         any = true;
         ImGui::PushID(static_cast<int>(contract.id));
-        ImGui::TextWrapped("%s", sandbox().describe(contract).c_str());
-        ImGui::TextDisabled("%lld cr  ·  quedan %s", static_cast<long long>(contract.reward),
+        ImGui::TextWrapped("%s", render(sandbox().describe(contract), activeCatalog()).c_str());
+        ImGui::TextDisabled(tr("%lld cr  ·  quedan %s"), static_cast<long long>(contract.reward),
                             remaining(contract).c_str());
         if (contract.kind == ContractKind::Delivery) {
             u32 held = 0;
@@ -944,43 +1031,44 @@ void GameApp::drawContractsWindow() {
                 held = item.good == contract.good ? item.tonnes : held;
             }
             ImGui::SameLine();
-            ImGui::TextDisabled("·  entregado %u / %u t  ·  en bodega %u t", contract.delivered,
+            ImGui::TextDisabled(tr("·  entregado %u / %u t  ·  en bodega %u t"), contract.delivered,
                                 contract.tonnes, held);
-            if (m_snapshot.dockedPort == contract.port && held > 0 && ImGui::SmallButton("Entregar")) {
+            if (m_snapshot.dockedPort == contract.port && held > 0 && ImGui::SmallButton(tr("Entregar"))) {
                 submitContract(contract.id, ContractAction::Deliver);
             }
             ImGui::SameLine();
         }
-        if (ImGui::SmallButton("Abandonar")) {
+        if (ImGui::SmallButton(tr("Abandonar"))) {
             submitContract(contract.id, ContractAction::Abandon);
         }
         ImGui::Separator();
         ImGui::PopID();
     }
     if (!any) {
-        ImGui::TextDisabled("Ninguno.");
+        ImGui::TextDisabled("%s", tr("Ninguno."));
     }
 
     ImGui::Spacing();
     const usize open =
         static_cast<usize>(std::count_if(contracts.begin(), contracts.end(),
                                          [](const Contract& c) { return c.state == ContractState::Open; }));
-    ImGui::TextDisabled("Tablón de contratos (%zu publicados)", open);
+    ImGui::TextDisabled(tr("Tablón de contratos (%zu publicados)"), open);
     if (m_snapshot.playerHostile) {
-        ImGui::TextColored(color(255, 100, 90), "La Autoridad no da contratos a quien considera hostil.");
+        ImGui::TextColored(color(255, 100, 90), "%s",
+                           tr("La Autoridad no da contratos a quien considera hostil."));
     } else if (!atStation) {
-        ImGui::TextDisabled("Atraca en una estación para verlos y aceptarlos.");
+        ImGui::TextDisabled("%s", tr("Atraca en una estación para verlos y aceptarlos."));
     } else {
         for (const Contract& contract : contracts) {
             if (contract.state != ContractState::Open) {
                 continue;
             }
             ImGui::PushID(static_cast<int>(contract.id));
-            ImGui::TextWrapped("%s", sandbox().describe(contract).c_str());
-            ImGui::TextDisabled("%lld cr  ·  quedan %s", static_cast<long long>(contract.reward),
+            ImGui::TextWrapped("%s", render(sandbox().describe(contract), activeCatalog()).c_str());
+            ImGui::TextDisabled(tr("%lld cr  ·  quedan %s"), static_cast<long long>(contract.reward),
                                 remaining(contract).c_str());
             ImGui::SameLine();
-            if (ImGui::SmallButton("Aceptar")) {
+            if (ImGui::SmallButton(tr("Aceptar"))) {
                 submitContract(contract.id, ContractAction::Accept);
             }
             ImGui::PopID();
@@ -992,30 +1080,30 @@ void GameApp::drawContractsWindow() {
 void GameApp::drawKnownPrices(EntityId port) {
     const KnownPricesView* known = m_snapshot.findKnownPrices(port);
     if (known == nullptr || known->prices == nullptr) {
-        ImGui::TextDisabled("Sin datos de mercado: nadie te ha contado sus precios.");
+        ImGui::TextDisabled("%s", tr("Sin datos de mercado: nadie te ha contado sus precios."));
         return;
     }
-    ImGui::TextDisabled("Precios que conoces (de hace %s)",
+    ImGui::TextDisabled(tr("Precios que conoces (de hace %s)"),
                         formatDuration(SimDuration::seconds(static_cast<i64>(known->ageSeconds))).c_str());
     if (ImGui::BeginTable("known", 4, ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingStretchProp)) {
-        ImGui::TableSetupColumn("Bien");
-        ImGui::TableSetupColumn("Compra");
-        ImGui::TableSetupColumn("Venta");
-        ImGui::TableSetupColumn("Existencias");
+        ImGui::TableSetupColumn(tr("Bien"));
+        ImGui::TableSetupColumn(tr("Compra"));
+        ImGui::TableSetupColumn(tr("Venta"));
+        ImGui::TableSetupColumn(tr("Existencias"));
         ImGui::TableHeadersRow();
         for (const PricePoint& point : known->prices->prices) {
             ImGui::TableNextRow();
             ImGui::TableNextColumn();
-            ImGui::TextUnformatted(sandbox().economy().goods()[point.good].name.c_str());
+            ImGui::TextUnformatted(tr(sandbox().economy().goods()[point.good].name.c_str()));
             ImGui::TableNextColumn();
             ImGui::Text("%lld", static_cast<long long>(point.buy));
             ImGui::TableNextColumn();
             ImGui::Text("%lld", static_cast<long long>(point.sell));
             ImGui::TableNextColumn();
-            ImGui::TextUnformatted(point.stockRatio < 0.3   ? "escasas"
-                                   : point.stockRatio < 0.8 ? "bajas"
-                                   : point.stockRatio < 1.5 ? "normales"
-                                                            : "abundantes");
+            ImGui::TextUnformatted(point.stockRatio < 0.3   ? tr("escasas")
+                                   : point.stockRatio < 0.8 ? tr("bajas")
+                                   : point.stockRatio < 1.5 ? tr("normales")
+                                                            : tr("abundantes"));
         }
         ImGui::EndTable();
     }
@@ -1024,7 +1112,7 @@ void GameApp::drawKnownPrices(EntityId port) {
 void GameApp::drawEconomyInspector() {
     const SandboxStats& stats = sandbox().stats();
     ImGui::Text(
-        "Comerciantes: %llu cargas, %llu t entregadas, %llu viajes de reposición, %llu de exploración",
+        tr("Comerciantes: %llu cargas, %llu t entregadas, %llu viajes de reposición, %llu de exploración"),
         static_cast<unsigned long long>(stats.haulerTrades),
         static_cast<unsigned long long>(stats.tonnesDelivered),
         static_cast<unsigned long long>(stats.repositionTrips),
@@ -1032,40 +1120,44 @@ void GameApp::drawEconomyInspector() {
     if (sandbox().config().finance) {
         const BankLedger& bank = sandbox().bank();
         const MutualLedger& mutual = sandbox().mutual();
-        ImGui::Text("Banco: capital %lld cr (caja %lld, préstamos %lld, depósitos %lld) · impagos %lld",
+        ImGui::Text(tr("Banco: capital %lld cr (caja %lld, préstamos %lld, depósitos %lld) · impagos %lld"),
                     static_cast<long long>(bank.equity()), static_cast<long long>(bank.cash),
                     static_cast<long long>(bank.loans), static_cast<long long>(bank.deposits),
                     static_cast<long long>(bank.writtenOff));
-        ImGui::Text("Mutua de Fletadores: fondo %lld cr · prima %.0f cr/h por carguero · siniestros %lld cr "
-                    "(%llu cascos, reparaciones %lld)",
-                    static_cast<long long>(mutual.fund), sandbox().premiumPerHour(),
-                    static_cast<long long>(mutual.claimsPaid), static_cast<unsigned long long>(mutual.claims),
-                    static_cast<long long>(mutual.repairsPaid));
         ImGui::Text(
-            "Flota: %zu cargueros · uno más ganaría %.0f cr/h · %llu comprados · %llu embargados · %zu "
-            "armadores esperando",
+            tr("Mutua de Fletadores: fondo %lld cr · prima %.0f cr/h por carguero · siniestros %lld cr "
+               "(%llu cascos, reparaciones %lld)"),
+            static_cast<long long>(mutual.fund), sandbox().premiumPerHour(),
+            static_cast<long long>(mutual.claimsPaid), static_cast<unsigned long long>(mutual.claims),
+            static_cast<long long>(mutual.repairsPaid));
+        ImGui::Text(
+            tr("Flota: %zu cargueros · uno más ganaría %.0f cr/h · %llu comprados · %llu embargados · %zu "
+               "armadores esperando"),
             simulation().world().components<HaulerBrain>().size(), sandbox().expectedEarningsPerHour(),
             static_cast<unsigned long long>(stats.shipsBought),
             static_cast<unsigned long long>(stats.repossessions), sandbox().buyers().size());
     }
     for (const MarketView& market : m_snapshot.markets) {
-        const std::string label =
-            std::format("{} (peligro {:.2f})###eco{}", nameOf(market.port),
-                        sandbox().danger(market.port, simulation().now()), market.port.index);
+        const std::string label = trf("{} (peligro {:.2f})", nameOf(market.port),
+                                      sandbox().danger(market.port, simulation().now())) +
+                                  std::format("###eco{}", market.port.index);
         if (!ImGui::TreeNode(label.c_str())) {
             continue;
         }
         if (ImGui::BeginTable("eco", 5, ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingStretchProp)) {
-            ImGui::TableSetupColumn("Bien");
-            ImGui::TableSetupColumn("Existencias");
-            ImGui::TableSetupColumn("Precio");
-            ImGui::TableSetupColumn("Prod./cons. t/h");
-            ImGui::TableSetupColumn("Escasez");
+            ImGui::TableSetupColumn(tr("Bien"));
+            ImGui::TableSetupColumn(tr("Existencias"));
+            ImGui::TableSetupColumn(tr("Precio"));
+            ImGui::TableSetupColumn(tr("Prod./cons. t/h"));
+            ImGui::TableSetupColumn(tr("Escasez"));
             ImGui::TableHeadersRow();
             for (const MarketRowView& row : market.rows) {
                 ImGui::TableNextRow();
                 ImGui::TableNextColumn();
-                ImGui::TextUnformatted(row.name.data(), row.name.data() + row.name.size());
+                {
+                    const std::string_view good = tr(row.name);
+                    ImGui::TextUnformatted(good.data(), good.data() + good.size());
+                }
                 ImGui::TableNextColumn();
                 ImGui::Text("%.0f / %.0f", row.stock, row.target);
                 ImGui::TableNextColumn();
@@ -1085,45 +1177,46 @@ void GameApp::drawContactSelection(const ContactView& contact) {
     if (contact.level == ContactLevel::Identified && !contact.name.empty()) {
         ImGui::Text("%.*s", static_cast<int>(contact.name.size()), contact.name.data());
     } else if (contact.level == ContactLevel::Classified) {
-        ImGui::Text("Contacto %u: %s?", contact.trackId, content::kShipClasses[contact.shipClass].name);
+        ImGui::Text(tr("Contacto %u: %s?"), contact.trackId,
+                    tr(content::kShipClasses[contact.shipClass].name));
     } else {
-        ImGui::Text("Contacto desconocido %u", contact.trackId);
+        ImGui::Text(tr("Contacto desconocido %u"), contact.trackId);
     }
-    ImGui::TextDisabled("Sensores: %s", displayName(contact.level));
+    ImGui::TextDisabled(tr("Sensores: %s"), displayName(contact.level));
     if (contact.level == ContactLevel::Identified) {
-        ImGui::TextDisabled("Facción: %s  ·  %s", content::kFactionNames[contact.faction],
-                            content::kShipClasses[contact.shipClass].name);
+        ImGui::TextDisabled(tr("Facción: %s  ·  %s"), tr(content::kFactionNames[contact.faction]),
+                            tr(content::kShipClasses[contact.shipClass].name));
     }
     Vec3d playerPosition;
     if (m_snapshot.positionOf(sandbox().playerShip(), playerPosition)) {
-        ImGui::Text("Distancia estimada: %s",
+        ImGui::Text(tr("Distancia estimada: %s"),
                     formatDistance(length(contact.position - playerPosition)).c_str());
     }
-    ImGui::Text("Incertidumbre: ±%s", formatDistance(contact.uncertainty).c_str());
-    ImGui::Text("Velocidad estimada: %s", formatSpeed(length(contact.velocity)).c_str());
-    ImGui::Text("Última detección: hace %.0f s", contact.ageSeconds);
-    if (ImGui::Button("Ir a su posición estimada")) {
+    ImGui::Text(tr("Incertidumbre: ±%s"), formatDistance(contact.uncertainty).c_str());
+    ImGui::Text(tr("Velocidad estimada: %s"), formatSpeed(length(contact.velocity)).c_str());
+    ImGui::Text(tr("Última detección: hace %.0f s"), contact.ageSeconds);
+    if (ImGui::Button(tr("Ir a su posición estimada"))) {
         submitPilot(FlightMode::MoveTo, {}, contact.position);
     }
-    if (ImGui::Button("Interceptar")) {
+    if (ImGui::Button(tr("Interceptar"))) {
         submitEngage(contact.trackId, false, true);
     }
     ImGui::SameLine();
     const ShipView* player = m_snapshot.findShip(sandbox().playerShip());
     if (player != nullptr && player->fireTrack == contact.trackId) {
-        if (ImGui::Button("Alto el fuego (C)")) {
+        if (ImGui::Button(tr("Alto el fuego (C)"))) {
             submitEngage(0, false, false);
         }
-    } else if (ImGui::Button("Atacar (E)")) {
+    } else if (ImGui::Button(tr("Atacar (E)"))) {
         submitEngage(contact.trackId, true, true);
     }
     ImGui::SameLine();
-    if (ImGui::Button("Abordar (B)")) {
+    if (ImGui::Button(tr("Abordar (B)"))) {
         submitBoard(contact.trackId);
     }
-    ImGui::TextDisabled("Abordar: a menos de 5 km, velocidad igualada y la otra nave sin energía.");
+    ImGui::TextDisabled("%s", tr("Abordar: a menos de 5 km, velocidad igualada y la otra nave sin energía."));
     if (m_showTruth && contact.ghost) {
-        ImGui::TextColored(color(255, 90, 200), "[depuración] contacto fantasma: no existe");
+        ImGui::TextColored(color(255, 90, 200), "%s", tr("[depuración] contacto fantasma: no existe"));
     }
 }
 
@@ -1137,7 +1230,7 @@ void GameApp::drawSelectionPanel() {
         const ImVec2 display = ImGui::GetIO().DisplaySize;
         ImGui::SetNextWindowPos({display.x - 370.0f, 90.0f}, ImGuiCond_FirstUseEver);
         ImGui::SetNextWindowSize({360.0f, display.y * 0.6f}, ImGuiCond_FirstUseEver);
-        ImGui::Begin("Selección");
+        ImGui::Begin(tr("Selección"));
         drawContactSelection(*contact);
         ImGui::End();
         return;
@@ -1152,38 +1245,40 @@ void GameApp::drawSelectionPanel() {
     const ImVec2 display = ImGui::GetIO().DisplaySize;
     ImGui::SetNextWindowPos({display.x - 370.0f, 90.0f}, ImGuiCond_FirstUseEver);
     ImGui::SetNextWindowSize({360.0f, display.y * 0.6f}, ImGuiCond_FirstUseEver);
-    ImGui::Begin("Selección");
+    ImGui::Begin(tr("Selección"));
     ImGui::Text("%s", nameOf(m_selected).c_str());
     const bool isPort = m_snapshot.findMarket(m_selected) != nullptr;
     if (const BodyView* body = m_snapshot.findBody(m_selected)) {
-        ImGui::TextDisabled("%s  ·  radio %s", displayName(body->kind), formatDistance(body->radius).c_str());
+        ImGui::TextDisabled(tr("%s  ·  radio %s"), displayName(body->kind),
+                            formatDistance(body->radius).c_str());
     } else if (const ShipView* ship = m_snapshot.findShip(m_selected)) {
-        ImGui::TextDisabled("%s  ·  %s  ·  %s", content::kShipClasses[ship->shipClass].name,
-                            content::kFactionNames[ship->faction], displayName(ship->mode));
+        ImGui::TextDisabled("%s  ·  %s  ·  %s", tr(content::kShipClasses[ship->shipClass].name),
+                            tr(content::kFactionNames[ship->faction]), displayName(ship->mode));
     }
     Vec3d selectedPosition;
     Vec3d playerPosition;
     if (m_snapshot.positionOf(m_selected, selectedPosition) &&
         m_snapshot.positionOf(sandbox().playerShip(), playerPosition)) {
-        ImGui::TextDisabled("Distancia a tu nave: %s",
+        ImGui::TextDisabled(tr("Distancia a tu nave: %s"),
                             formatDistance(length(selectedPosition - playerPosition)).c_str());
     }
-    if (m_selected != sandbox().playerShip() && ImGui::Button("Fijar rumbo")) {
+    if (m_selected != sandbox().playerShip() && ImGui::Button(tr("Fijar rumbo"))) {
         submitPilot(FlightMode::Approach, m_selected);
     }
     ImGui::SameLine();
-    if (ImGui::Button("Seguir (F)")) {
+    if (ImGui::Button(tr("Seguir (F)"))) {
         m_map.camera().follow = m_selected;
     }
     ImGui::Separator();
-    if (isPort && ImGui::CollapsingHeader("Mercado", ImGuiTreeNodeFlags_DefaultOpen)) {
+    if (isPort && ImGui::CollapsingHeader(tr("Mercado"), ImGuiTreeNodeFlags_DefaultOpen)) {
         if (m_selected == m_snapshot.dockedPort) {
-            ImGui::TextColored(color(120, 255, 150), "Atracado aquí: comercia en la ventana Mercado.");
+            ImGui::TextColored(color(120, 255, 150), "%s",
+                               tr("Atracado aquí: comercia en la ventana Mercado."));
         } else {
             drawKnownPrices(m_selected);
         }
     }
-    if (ImGui::CollapsingHeader("Inspector de entidad", ImGuiTreeNodeFlags_DefaultOpen)) {
+    if (ImGui::CollapsingHeader(tr("Inspector de entidad"), ImGuiTreeNodeFlags_DefaultOpen)) {
         const EntityId clicked = m_inspector.draw(simulation().world(), m_selected);
         if (clicked.isValid()) {
             m_selected = clicked;
@@ -1196,30 +1291,32 @@ void GameApp::drawSensorsPanel() {
     const ImVec2 display = ImGui::GetIO().DisplaySize;
     ImGui::SetNextWindowPos({display.x - 370.0f, display.y * 0.6f + 100.0f}, ImGuiCond_FirstUseEver);
     ImGui::SetNextWindowSize({360.0f, display.y * 0.4f - 140.0f}, ImGuiCond_FirstUseEver);
-    ImGui::Begin("Sensores");
+    ImGui::Begin(tr("Sensores"));
     const SensorSuite& sensors = m_snapshot.playerSensors;
     const bool radarAvailable = sensors.activeStrength > 0.0;
-    if (radarAvailable && ImGui::Button(sensors.activeOn ? "Apagar radar (R)" : "Encender radar (R)")) {
+    if (radarAvailable &&
+        ImGui::Button(sensors.activeOn ? tr("Apagar radar (R)") : tr("Encender radar (R)"))) {
         submitSensors(!sensors.activeOn, sensors.transponderOn);
     }
     ImGui::SameLine();
-    if (ImGui::Button(sensors.transponderOn ? "Apagar transpondedor (T)" : "Encender transpondedor (T)")) {
+    if (ImGui::Button(sensors.transponderOn ? tr("Apagar transpondedor (T)")
+                                            : tr("Encender transpondedor (T)"))) {
         submitSensors(sensors.activeOn, !sensors.transponderOn);
     }
     // How visible the player is, against the passive sensors of a typical hauler.
     const f64 haulerSensitivity = content::kShipSensors[content::kShipClassHauler].passiveSensitivity;
-    ImGui::Text("Tu firma: %.2g", m_snapshot.playerEmission);
+    ImGui::Text(tr("Tu firma: %.2g"), m_snapshot.playerEmission);
     ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyle().Colors[ImGuiCol_TextDisabled]);
     ImGui::TextWrapped(
-        "Un carguero te detecta a %s%s",
+        tr("Un carguero te detecta a %s%s"),
         formatDistance(passiveDetectionRange(m_snapshot.playerEmission, haulerSensitivity)).c_str(),
-        sensors.transponderOn ? " (y te identifica a 1 UA por el transpondedor)" : "");
+        sensors.transponderOn ? tr(" (y te identifica a 1 UA por el transpondedor)") : "");
     ImGui::PopStyleColor();
     ImGui::Separator();
 
     Vec3d playerPosition;
     if (!m_snapshot.positionOf(sandbox().playerShip(), playerPosition)) {
-        ImGui::TextDisabled("Sin nave, no hay sensores.");
+        ImGui::TextDisabled("%s", tr("Sin nave, no hay sensores."));
         ImGui::End();
         return;
     }
@@ -1230,12 +1327,12 @@ void GameApp::drawSensorsPanel() {
     std::sort(contacts.begin(), contacts.end(), [&](const ContactView* a, const ContactView* b) {
         return lengthSquared(a->position - playerPosition) < lengthSquared(b->position - playerPosition);
     });
-    ImGui::TextDisabled("%zu contactos (clic para seleccionar)", contacts.size());
+    ImGui::TextDisabled(tr("%zu contactos (clic para seleccionar)"), contacts.size());
     if (ImGui::BeginTable("contacts", 4, ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingStretchProp)) {
-        ImGui::TableSetupColumn("Contacto");
-        ImGui::TableSetupColumn("Nivel");
-        ImGui::TableSetupColumn("Distancia");
-        ImGui::TableSetupColumn("Hace");
+        ImGui::TableSetupColumn(tr("Contacto"));
+        ImGui::TableSetupColumn(tr("Nivel"));
+        ImGui::TableSetupColumn(tr("Distancia"));
+        ImGui::TableSetupColumn(tr("Hace"));
         ImGui::TableHeadersRow();
         for (const ContactView* contact : contacts) {
             ImGui::TableNextRow();
@@ -1262,8 +1359,8 @@ void GameApp::drawJournal() {
     const ImVec2 display = ImGui::GetIO().DisplaySize;
     ImGui::SetNextWindowPos({10.0f, display.y * 0.55f + 100.0f}, ImGuiCond_FirstUseEver);
     ImGui::SetNextWindowSize({440.0f, display.y * 0.45f - 140.0f}, ImGuiCond_FirstUseEver);
-    ImGui::Begin("Diario");
-    ImGui::Checkbox("Tráfico de otras naves", &m_showTraffic);
+    ImGui::Begin(tr("Diario"));
+    ImGui::Checkbox(tr("Tráfico de otras naves"), &m_showTraffic);
     ImGui::Separator();
     ImGui::BeginChild("entries");
     const auto& journal = sandbox().journal();
@@ -1278,7 +1375,7 @@ void GameApp::drawJournal() {
         } else if (it->kind == JournalKind::Traffic) {
             ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyle().Colors[ImGuiCol_TextDisabled]);
         }
-        ImGui::TextWrapped("%s", it->text.c_str());
+        ImGui::TextWrapped("%s", render(it->text, activeCatalog()).c_str());
         if (it->kind != JournalKind::Player) {
             ImGui::PopStyleColor();
         }
@@ -1291,69 +1388,69 @@ void GameApp::drawDebugPanel() {
     const ImVec2 display = ImGui::GetIO().DisplaySize;
     ImGui::SetNextWindowPos({display.x - 480.0f, display.y * 0.6f + 100.0f}, ImGuiCond_FirstUseEver);
     ImGui::SetNextWindowSize({470.0f, display.y * 0.4f - 140.0f}, ImGuiCond_FirstUseEver);
-    ImGui::Begin("Depuración (F3)", &m_showDebug);
+    ImGui::Begin(tr("Depuración (F3)"), &m_showDebug);
     const ImGuiIO& io = ImGui::GetIO();
     const SimulationStats& stats = simulation().stats();
     const SystemState& flight = simulation().scheduler().system(sandbox().flightSystem());
-    ImGui::Text("%.0f FPS  (%.2f ms/frame)", io.Framerate, 1000.0f / io.Framerate);
-    ImGui::Text("Simulación: %llu pasos en el último frame, %.2f ms",
+    ImGui::Text(tr("%.0f FPS  (%.2f ms/frame)"), io.Framerate, 1000.0f / io.Framerate);
+    ImGui::Text(tr("Simulación: %llu pasos en el último frame, %.2f ms"),
                 static_cast<unsigned long long>(m_stepsLastFrame), m_simulationMsLastFrame);
-    ImGui::Text("Pasos totales: %llu  ·  eventos: %llu  ·  comandos: %llu",
+    ImGui::Text(tr("Pasos totales: %llu  ·  eventos: %llu  ·  comandos: %llu"),
                 static_cast<unsigned long long>(stats.steps),
                 static_cast<unsigned long long>(stats.eventsEmitted),
                 static_cast<unsigned long long>(stats.commandsApplied));
-    ImGui::Text("Vuelo y combate (LOD): paso de %s", formatDuration(flight.desc.period).c_str());
+    ImGui::Text(tr("Vuelo y combate (LOD): paso de %s"), formatDuration(flight.desc.period).c_str());
     const CombatStats& combat = sandbox().combat().stats();
     const SandboxStats& game = sandbox().stats();
-    ImGui::Text("Autoridad: tesorería %lld cr · impuestos %lld · reparaciones %lld · recompensas %lld",
+    ImGui::Text(tr("Autoridad: tesorería %lld cr · impuestos %lld · reparaciones %lld · recompensas %lld"),
                 static_cast<long long>(m_snapshot.treasury), static_cast<long long>(game.taxesCollected),
                 static_cast<long long>(game.repairFees), static_cast<long long>(game.bountiesPaid));
-    ImGui::Text("Salarios pagados %lld cr · quiebras %llu · abordajes %llu",
+    ImGui::Text(tr("Salarios pagados %lld cr · quiebras %llu · abordajes %llu"),
                 static_cast<long long>(game.wagesPaid), static_cast<unsigned long long>(game.bankruptcies),
                 static_cast<unsigned long long>(game.boardings));
-    ImGui::Text("Patrullas: %zu en servicio · %llu puestas · %llu perdidas · %llu piratas abatidos · "
-                "mantenimiento %lld cr",
+    ImGui::Text(tr("Patrullas: %zu en servicio · %llu puestas · %llu perdidas · %llu piratas abatidos · "
+                   "mantenimiento %lld cr"),
                 simulation().world().components<PatrolBrain>().size(),
                 static_cast<unsigned long long>(game.patrolsCommissioned),
                 static_cast<unsigned long long>(game.patrolsLost),
                 static_cast<unsigned long long>(game.piratesKilledByPatrols),
                 static_cast<long long>(game.patrolUpkeepPaid));
-    ImGui::Text("Combate: %llu disparos, %llu impactos, %llu naves destruidas",
+    ImGui::Text(tr("Combate: %llu disparos, %llu impactos, %llu naves destruidas"),
                 static_cast<unsigned long long>(combat.shotsFired),
                 static_cast<unsigned long long>(combat.hits),
                 static_cast<unsigned long long>(combat.shipsDestroyed));
     ImGui::Text(
-        "Piratas: %llu cacerías, %llu abatidos, %llu huidos  ·  cargueros perdidos: %llu",
+        tr("Piratas: %llu cacerías, %llu abatidos, %llu huidos  ·  cargueros perdidos: %llu"),
         static_cast<unsigned long long>(game.hunts), static_cast<unsigned long long>(game.piratesLost),
         static_cast<unsigned long long>(game.piratesLeft), static_cast<unsigned long long>(game.haulersLost));
-    ImGui::Text("Entidades: %u  ·  semilla %llu  ·  rechazados: %llu", simulation().world().entityCount(),
+    ImGui::Text(tr("Entidades: %u  ·  semilla %llu  ·  rechazados: %llu"), simulation().world().entityCount(),
                 static_cast<unsigned long long>(m_config.seed),
                 static_cast<unsigned long long>(sandbox().stats().commandsRejected));
-    ImGui::Checkbox("Mostrar la verdad (omnisciencia de depuración)", &m_showTruth);
-    if (ImGui::Button("Guardar (F5)")) {
+    ImGui::Checkbox(tr("Mostrar la verdad (omnisciencia de depuración)"), &m_showTruth);
+    if (ImGui::Button(tr("Guardar (F5)"))) {
         m_pending = PendingAction::Save;
     }
     ImGui::SameLine();
-    if (ImGui::Button("Cargar (F9)")) {
+    if (ImGui::Button(tr("Cargar (F9)"))) {
         m_pending = PendingAction::Load;
     }
     ImGui::SameLine();
-    if (ImGui::Button("Nueva partida")) {
+    if (ImGui::Button(tr("Nueva partida"))) {
         m_pending = PendingAction::NewGame;
     }
-    if (ImGui::CollapsingHeader("Economía (verdad)")) {
+    if (ImGui::CollapsingHeader(tr("Economía (verdad)"))) {
         drawEconomyInspector();
     }
-    if (ImGui::CollapsingHeader("Perfilador", ImGuiTreeNodeFlags_DefaultOpen)) {
-        if (ImGui::SmallButton("Reiniciar estadísticas")) {
+    if (ImGui::CollapsingHeader(tr("Perfilador"), ImGuiTreeNodeFlags_DefaultOpen)) {
+        if (ImGui::SmallButton(tr("Reiniciar estadísticas"))) {
             profiling::resetStats();
         }
         const std::vector<profiling::ZoneSummary> zones = profiling::summary();
         if (ImGui::BeginTable("zones", 4, ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingStretchProp)) {
-            ImGui::TableSetupColumn("Zona");
-            ImGui::TableSetupColumn("Llamadas");
-            ImGui::TableSetupColumn("Media µs");
-            ImGui::TableSetupColumn("Máx µs");
+            ImGui::TableSetupColumn(tr("Zona"));
+            ImGui::TableSetupColumn(tr("Llamadas"));
+            ImGui::TableSetupColumn(tr("Media µs"));
+            ImGui::TableSetupColumn(tr("Máx µs"));
             ImGui::TableHeadersRow();
             for (usize i = 0; i < std::min<usize>(zones.size(), 14); ++i) {
                 const profiling::ZoneSummary& zone = zones[i];
@@ -1376,26 +1473,33 @@ void GameApp::drawDebugPanel() {
 void GameApp::drawHelp() {
     const ImVec2 display = ImGui::GetIO().DisplaySize;
     ImGui::SetNextWindowPos({display.x * 0.5f, 90.0f}, ImGuiCond_FirstUseEver, {0.5f, 0.0f});
-    ImGui::Begin("Controles (F1)", &m_showHelp, ImGuiWindowFlags_AlwaysAutoResize);
-    ImGui::BulletText("Rueda: zoom (de metros a unidades astronómicas)   ·   Arrastrar: mover la vista");
-    ImGui::BulletText("Clic: seleccionar   ·   Clic derecho: ir a ese objeto o a ese punto");
-    ImGui::BulletText("W A S D: empuje manual (newtoniano: la nave sigue derivando)   ·   X: frenar");
-    ImGui::BulletText("Espacio: pausa   ·   1 / 2 / 3: velocidad x1 (tiempo real) / x3 / x10");
-    ImGui::BulletText("Viajes largos: salto al hiperespacio fuera de los pozos gravitatorios (círculos)");
+    ImGui::Begin(tr("Controles (F1)"), &m_showHelp, ImGuiWindowFlags_AlwaysAutoResize);
+    ImGui::BulletText("%s",
+                      tr("Rueda: zoom (de metros a unidades astronómicas)   ·   Arrastrar: mover la vista"));
+    ImGui::BulletText("%s", tr("Clic: seleccionar   ·   Clic derecho: ir a ese objeto o a ese punto"));
+    ImGui::BulletText("%s",
+                      tr("W A S D: empuje manual (newtoniano: la nave sigue derivando)   ·   X: frenar"));
+    ImGui::BulletText("%s", tr("Espacio: pausa   ·   1 / 2 / 3: velocidad x1 (tiempo real) / x3 / x10"));
+    ImGui::BulletText("%s",
+                      tr("Viajes largos: salto al hiperespacio fuera de los pozos gravitatorios (círculos)"));
     ImGui::BulletText(
-        "R: radar (ves más, pero te ven de lejos)   ·   T: transpondedor (difunde tu identidad)");
+        "%s", tr("R: radar (ves más, pero te ven de lejos)   ·   T: transpondedor (difunde tu identidad)"));
     ImGui::BulletText(
-        "E: atacar el contacto seleccionado (lo persigue y dispara)   ·   C: alto el fuego   ·   "
-        "B: abordar");
+        "%s", tr("E: atacar el contacto seleccionado (lo persigue y dispara)   ·   C: alto el fuego   ·   "
+                 "B: abordar"));
     ImGui::BulletText(
-        "Recompensa por piratas; si los comerciantes te identifican atacándolos, pierdes reputación");
-    ImGui::BulletText("K: contratos (se aceptan en las estaciones; nacen de escaseces y piratas reales)");
-    ImGui::BulletText("Los piratas acechan junto a los pozos; cerca de las estaciones estás a salvo");
-    ImGui::BulletText("Atracado en un puerto: compra y vende en la ventana Mercado. Las estaciones te dan el "
-                      "boletín de precios de los comerciantes");
-    ImGui::BulletText("H: seguir tu nave   ·   F: seguir la selección   ·   Esc: deseleccionar");
-    ImGui::BulletText("F5: guardar   ·   F9: cargar   ·   F3: depuración   ·   F1: esta ayuda");
-    ImGui::BulletText("F11 o Alt+Intro: pantalla completa");
+        "%s",
+        tr("Recompensa por piratas; si los comerciantes te identifican atacándolos, pierdes reputación"));
+    ImGui::BulletText("%s",
+                      tr("K: contratos (se aceptan en las estaciones; nacen de escaseces y piratas reales)"));
+    ImGui::BulletText("%s",
+                      tr("Los piratas acechan junto a los pozos; cerca de las estaciones estás a salvo"));
+    ImGui::BulletText(
+        "%s", tr("Atracado en un puerto: compra y vende en la ventana Mercado. Las estaciones te dan el "
+                 "boletín de precios de los comerciantes"));
+    ImGui::BulletText("%s", tr("H: seguir tu nave   ·   F: seguir la selección   ·   Esc: deseleccionar"));
+    ImGui::BulletText("%s", tr("F5: guardar   ·   F9: cargar   ·   F3: depuración   ·   F1: esta ayuda"));
+    ImGui::BulletText("%s", tr("F11 o Alt+Intro: pantalla completa"));
     ImGui::End();
 }
 

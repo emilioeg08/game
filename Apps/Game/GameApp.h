@@ -4,6 +4,7 @@
 #include "Apps/Game/MapView.h"
 #include "Engine/Core/Log.h"
 #include "Engine/Jobs/JobSystem.h"
+#include "Engine/Text/Localization.h"
 #include "Engine/Time/TimeController.h"
 #include "Game/Presentation/SystemSnapshot.h"
 #include "Game/Presentation/UserSettings.h"
@@ -87,6 +88,14 @@ private:
     void refreshSaveSummary();
     void applySettings();
     void saveSettings();
+    // Languages (ADR-036): Spanish is built in; others are catalogs in <install>/data/lang/<code>.po.
+    struct LanguageOption {
+        std::string code;
+        std::string name; // in its own language
+    };
+    void scanLanguages();
+    void applyLanguage();
+    [[nodiscard]] std::string resolveLanguage() const;
     [[nodiscard]] bool menuOpen() const;
     void resetTimeController();
     void advanceSimulation(u64 realDeltaNs);
@@ -126,6 +135,8 @@ private:
     std::string m_imguiIniPath; // UTF-8, kept alive for ImGui
     std::shared_ptr<FileLogSink> m_logFile;
     UserSettings m_settings;
+    Catalog m_catalog;
+    std::vector<LanguageOption> m_languages;
     float m_displayScale = 1.0f; // the display's content scale; the UI uses it times m_settings.uiScale
 
     Screen m_screen = Screen::MainMenu;

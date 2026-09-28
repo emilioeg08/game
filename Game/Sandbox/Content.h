@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Engine/Core/Types.h"
+#include "Engine/Text/Localization.h"
 #include "Simulation/Economy/Economy.h"
 #include "Space/Bodies/CelestialBody.h"
 #include "Space/Combat/Combat.h"
@@ -26,7 +27,7 @@ enum Faction : u32 {
 };
 
 inline constexpr std::array<const char*, kFactionCount> kFactionNames = {
-    "Jugador", "Transportistas independientes", "Piratas", "Autoridad"};
+    GX_TEXT("Jugador"), GX_TEXT("Transportistas independientes"), GX_TEXT("Piratas"), GX_TEXT("Autoridad")};
 
 enum ShipClass : u32 {
     kShipClassCourier = 0,
@@ -47,10 +48,10 @@ struct ShipClassDef {
 
 // Real-time scale (x1 = real time, ADR-021): a trip between planets takes minutes at x1, seconds at x10.
 inline constexpr std::array<ShipClassDef, kShipClassCount> kShipClasses = {{
-    {"Correo", 50'000.0, 15'000'000.0, 1.5e9, 5.0, 40.0},     // 1 AU in hyperspace: ~100 s
-    {"Carguero", 15'000.0, 6'000'000.0, 6.0e8, 12.0, 120.0},  // 1 AU in hyperspace: ~250 s
-    {"Corsario", 40'000.0, 12'000'000.0, 1.2e9, 6.0, 60.0},   // hunts haulers where they drop out
-    {"Patrullero", 45'000.0, 14'000'000.0, 1.4e9, 5.0, 70.0}, // the Authority's: faster than a raider
+    {GX_TEXT("Correo"), 50'000.0, 15'000'000.0, 1.5e9, 5.0, 40.0},     // 1 AU in hyperspace: ~100 s
+    {GX_TEXT("Carguero"), 15'000.0, 6'000'000.0, 6.0e8, 12.0, 120.0},  // 1 AU in hyperspace: ~250 s
+    {GX_TEXT("Corsario"), 40'000.0, 12'000'000.0, 1.2e9, 6.0, 60.0},   // hunts haulers where they drop out
+    {GX_TEXT("Patrullero"), 45'000.0, 14'000'000.0, 1.4e9, 5.0, 70.0}, // the Authority's: faster than a raider
 }};
 
 // Sensors and signatures (ADR-023). Emission units are arbitrary; ranges follow from the SNR formulas:
@@ -80,14 +81,15 @@ enum Weapon : u32 { kWeaponLaser = 0, kWeaponRailgun = 1, kWeaponCount };
 
 inline std::vector<WeaponDef> weaponTable() {
     return {
-        {"Láser", WeaponKind::Beam, 800'000.0, 4.0, 0.0, 0.0, 1e-5},
-        {"Cañón de riel", WeaponKind::Projectile, 3'000'000.0, 15.0, 2.0, 5'000'000.0, 2e-5},
+        {GX_TEXT("Láser"), WeaponKind::Beam, 800'000.0, 4.0, 0.0, 0.0, 1e-5},
+        {GX_TEXT("Cañón de riel"), WeaponKind::Projectile, 3'000'000.0, 15.0, 2.0, 5'000'000.0, 2e-5},
     };
 }
 
 // Display names of the module types, indexed by ModuleType.
 inline constexpr std::array<const char*, static_cast<usize>(ModuleType::Count)> kModuleNames = {
-    "Estructura", "Reactor", "Motor", "Hipermotor", "Sensores", "Arma", "Bodega", "Habitáculo"};
+    GX_TEXT("Estructura"), GX_TEXT("Reactor"), GX_TEXT("Motor"),  GX_TEXT("Hipermotor"),
+    GX_TEXT("Sensores"),   GX_TEXT("Arma"),    GX_TEXT("Bodega"), GX_TEXT("Habitáculo")};
 
 struct ModuleDef {
     ModuleType type;
@@ -175,8 +177,8 @@ inline constexpr f64 kHyperspaceSpeedThreshold = 1e8; // m/s: tracks faster than
 enum Good : u32 { kGoodWater, kGoodFood, kGoodOre, kGoodFuel, kGoodMetals, kGoodMachinery, kGoodCount };
 
 inline std::vector<GoodDef> goodTable() {
-    return {{"Agua", 20.0},        {"Alimentos", 40.0}, {"Mineral", 30.0},
-            {"Combustible", 50.0}, {"Metales", 120.0},  {"Maquinaria", 300.0}};
+    return {{GX_TEXT("Agua"), 20.0},        {GX_TEXT("Alimentos"), 40.0}, {GX_TEXT("Mineral"), 30.0},
+            {GX_TEXT("Combustible"), 50.0}, {GX_TEXT("Metales"), 120.0},  {GX_TEXT("Maquinaria"), 300.0}};
 }
 
 inline constexpr std::array<u32, kShipClassCount> kCargoCapacity = {20, 100, 30, 0}; // tonnes

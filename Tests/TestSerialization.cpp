@@ -272,7 +272,9 @@ GX_TEST(Serialization, UserSettingsRoundTripAndTolerateOtherVersions) {
     settings.vsync = false;
     settings.uiScale = 1.25f;
     settings.showHelpOnStart = false;
+    settings.language = "en";
     GX_EXPECT(parseUserSettings(formatUserSettings(settings)) == settings);
+    GX_EXPECT(parseUserSettings("language=../../x").language == "auto"); // not a language code
     GX_EXPECT(parseUserSettings("") == UserSettings{}); // no file: defaults
     // Unknown keys, comments, spaces, Windows line ends, bad values and out-of-range scales.
     const UserSettings odd = parseUserSettings("# comment\r\n future_key = 7\r\nfullscreen = true\r\n"

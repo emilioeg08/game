@@ -3,6 +3,7 @@
 #include "Engine/Core/Random.h"
 #include "Engine/Core/Types.h"
 #include "Engine/Math/Vec3.h"
+#include "Engine/Text/Localization.h"
 #include "Engine/Time/SimTime.h"
 #include "Game/Sandbox/Contracts.h"
 #include "Simulation/Economy/Economy.h"
@@ -233,9 +234,10 @@ struct PatrolBrain {
 // goings (plenty of them: the client hides them unless asked).
 enum class JournalKind : u8 { Player, News, Traffic, Count };
 
+// What the journal records is a Message, rendered in the player's language when shown (ADR-036).
 struct JournalEntry {
     SimTime time;
-    std::string text;
+    Message text;
     JournalKind kind = JournalKind::Player;
 
     template <typename Archive>
@@ -426,7 +428,7 @@ public:
     // Open, accepted and recently closed contracts (ADR-031).
     [[nodiscard]] const std::vector<Contract>& contracts() const { return m_contracts; }
     // One line for the UI and the journal: "20 t de Agua a Arenmir II", "abatir al pirata ...".
-    [[nodiscard]] std::string describe(const Contract& contract) const;
+    [[nodiscard]] Message describe(const Contract& contract) const;
     // The system's bank and the traders' mutual insurer (ADR-033), and owners waiting for a new ship.
     [[nodiscard]] const BankLedger& bank() const { return m_bank; }
     [[nodiscard]] const MutualLedger& mutual() const { return m_mutual; }
@@ -502,7 +504,9 @@ private:
     void onSensorCommand(const SensorCommand& command, const TickContext& context);
     void onEngageCommand(const EngageCommand& command, const TickContext& context);
     void updateFlightRate(const World& world, SimTime now);
-    void addJournal(SimTime time, std::string text, JournalKind kind = JournalKind::Player);
+    void addJournal(SimTime time, Message text, JournalKind kind = JournalKind::Player);
+    // An entity's name as a journal argument (a body's title, such as "Estación", is translated).
+    [[nodiscard]] Message named(const World& world, EntityId entity) const;
     void rebuildPorts(const World& world);
     [[nodiscard]] std::string nameOf(const World& world, EntityId entity) const;
     [[nodiscard]] EntityId nearestStation(const World& world, const Vec3d& position, SimTime now) const;

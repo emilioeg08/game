@@ -22,3 +22,7 @@ imgui.ini
 
 # Packaged game (scripts/package.ps1)
 /dist/
+
+# Translation template (python tools/i18n.py extract)
+/data/lang/messages.pot
+__pycache__/

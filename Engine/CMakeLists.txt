@@ -25,6 +25,8 @@ add_library(gx_engine STATIC
     Serialization/Binary.h
     Serialization/SaveFile.cpp
     Serialization/SaveFile.h
+    Text/Localization.cpp
+    Text/Localization.h
     Time/SimClock.h
     Time/SimTime.cpp
     Time/SimTime.h

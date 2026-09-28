@@ -53,6 +53,14 @@ UserSettings parseUserSettings(std::string_view text) {
             parseBool(value, settings.vsync);
         } else if (key == "show_help") {
             parseBool(value, settings.showHelpOnStart);
+        } else if (key == "language") {
+            const bool valid =
+                !value.empty() && value.size() <= 8 && std::all_of(value.begin(), value.end(), [](char c) {
+                    return (c >= 'a' && c <= 'z') || c == '_' || (c >= 'A' && c <= 'Z');
+                });
+            if (valid) {
+                settings.language = std::string(value);
+            }
         } else if (key == "ui_scale") {
             f32 scale = 0.0f;
             const auto [ptr, error] = std::from_chars(value.data(), value.data() + value.size(), scale);
@@ -66,9 +74,9 @@ UserSettings parseUserSettings(std::string_view text) {
 
 std::string formatUserSettings(const UserSettings& settings) {
     return std::format("# GalaxyEngine: preferencias del jugador\n"
-                       "fullscreen={}\nvsync={}\nui_scale={:.2f}\nshow_help={}\n",
+                       "fullscreen={}\nvsync={}\nui_scale={:.2f}\nshow_help={}\nlanguage={}\n",
                        settings.fullscreen ? 1 : 0, settings.vsync ? 1 : 0, settings.uiScale,
-                       settings.showHelpOnStart ? 1 : 0);
+                       settings.showHelpOnStart ? 1 : 0, settings.language);
 }
 
 UserSettings loadUserSettings(const std::filesystem::path& path) {

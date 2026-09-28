@@ -43,6 +43,7 @@ if ($LASTEXITCODE -ne 0) { throw 'Installing the symbols failed' }
 $exe = Join-Path $content 'gx_game.exe'
 if (-not (Test-Path $exe)) { throw "The package has no gx_game.exe: $content" }
 if (Get-ChildItem -Path $content -Recurse -Include *.pdb, *.lib, *.ilk) { throw 'Build files leaked into the package' }
+if (-not (Test-Path (Join-Path $content 'data\lang\en.po'))) { throw 'The package has no translations (data/lang)' }
 
 if (-not $NoSmoke) {
     Write-Host '==> Smoke test' -ForegroundColor Cyan
@@ -51,7 +52,8 @@ if (-not $NoSmoke) {
     New-Item -ItemType Directory -Path $smoke | Out-Null
     $runs = @(
         @{ Shot = 'game.png'; Args = @('--no-help', '--prerun-hours', '0.5') },
-        @{ Shot = 'menu.png'; Args = @('--menu', 'main') }
+        @{ Shot = 'menu.png'; Args = @('--menu', 'main') },
+        @{ Shot = 'options.png'; Args = @('--menu', 'options') }
     )
     foreach ($run in $runs) {
         $shot = Join-Path $smoke $run.Shot

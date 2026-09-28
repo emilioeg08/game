@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Engine/Math/Vec3.h"
+#include "Engine/Text/Localization.h"
 #include "Game/Presentation/SystemSnapshot.h"
 #include "Simulation/World/EntityRegistry.h"
 
@@ -72,6 +73,8 @@ private:
 [[nodiscard]] const char* displayName(ModuleType type);
 // Label of a contact as the player knows it: name when identified, class when classified, track otherwise.
 [[nodiscard]] std::string contactLabel(const ContactView& contact);
+// A body's name in the active language: its title ("Estación", "Puerto"...) is translated.
+[[nodiscard]] std::string localizedName(std::string_view name);
 [[nodiscard]] std::string formatDistance(f64 meters);
 [[nodiscard]] std::string formatSpeed(f64 metersPerSecond);
 

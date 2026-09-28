@@ -4,6 +4,7 @@
 
 #include "Engine/Core/Paths.h"
 #include "Engine/Serialization/SaveFile.h"
+#include "Engine/Text/Localization.h"
 
 #include <SDL3/SDL.h>
 #include <imgui.h>
@@ -121,41 +122,41 @@ void GameApp::drawMainMenu() {
         ImGui::PushFont(nullptr, 44.0f);
         centeredText(kTitle, IM_COL32(235, 240, 255, 255));
         ImGui::PopFont();
-        centeredText(std::format("Sandbox · versión {}", GX_VERSION).c_str(), IM_COL32(140, 160, 190, 255));
+        centeredText(trf("Sandbox · versión {}", GX_VERSION).c_str(), IM_COL32(140, 160, 190, 255));
         ImGui::Dummy({0.0f, 12.0f * scale});
 
         if (!m_saveSummary.empty()) {
-            if (menuButton("Continuar", scale)) {
+            if (menuButton(tr("Continuar"), scale)) {
                 m_pending = PendingAction::Load;
             }
             ImGui::TextDisabled("%s", m_saveSummary.c_str());
             ImGui::Dummy({0.0f, 4.0f * scale});
         }
-        if (menuButton("Nueva partida", scale)) {
+        if (menuButton(tr("Nueva partida"), scale)) {
             m_seedPanel = !m_seedPanel;
         }
         if (m_seedPanel) {
             ImGui::Indent(12.0f * scale);
-            ImGui::TextDisabled("Cada semilla genera un sistema estelar distinto.");
+            ImGui::TextDisabled("%s", tr("Cada semilla genera un sistema estelar distinto."));
             ImGui::SetNextItemWidth(160.0f * scale);
-            ImGui::InputScalar("Semilla", ImGuiDataType_U64, &m_menuSeed);
+            ImGui::InputScalar(tr("Semilla"), ImGuiDataType_U64, &m_menuSeed);
             m_menuSeed = std::min(m_menuSeed, kMaxSeed);
-            if (ImGui::Button("Empezar")) {
+            if (ImGui::Button(tr("Empezar"))) {
                 m_newGameSeed = m_menuSeed;
                 m_pending = PendingAction::NewGame;
             }
             ImGui::SameLine();
-            if (ImGui::Button("Sistema al azar")) {
+            if (ImGui::Button(tr("Sistema al azar"))) {
                 m_newGameSeed.reset();
                 m_pending = PendingAction::NewGame;
             }
             ImGui::Unindent(12.0f * scale);
             ImGui::Dummy({0.0f, 4.0f * scale});
         }
-        if (menuButton("Opciones", scale)) {
+        if (menuButton(tr("Opciones"), scale)) {
             m_showOptions = true;
         }
-        if (menuButton("Salir", scale)) {
+        if (menuButton(tr("Salir"), scale)) {
             m_quit = true;
         }
         ImGui::Dummy({0.0f, 6.0f * scale});
@@ -174,26 +175,26 @@ void GameApp::drawPauseMenu() {
         ImGui::BeginDisabled(blocked);
         ImGui::Dummy({0.0f, 4.0f * scale});
         ImGui::PushFont(nullptr, 28.0f);
-        centeredText("Pausa", IM_COL32(235, 240, 255, 255));
+        centeredText(tr("Pausa"), IM_COL32(235, 240, 255, 255));
         ImGui::PopFont();
         ImGui::Dummy({0.0f, 8.0f * scale});
-        if (menuButton("Continuar (Esc)", scale)) {
+        if (menuButton(tr("Continuar (Esc)"), scale)) {
             m_pauseMenu = false;
         }
-        if (menuButton("Guardar (F5)", scale)) {
+        if (menuButton(tr("Guardar (F5)"), scale)) {
             m_pending = PendingAction::Save;
             m_pauseMenu = false;
         }
-        if (menuButton("Cargar (F9)", scale)) {
+        if (menuButton(tr("Cargar (F9)"), scale)) {
             m_pending = PendingAction::Load;
         }
-        if (menuButton("Opciones", scale)) {
+        if (menuButton(tr("Opciones"), scale)) {
             m_showOptions = true;
         }
-        if (menuButton("Menú principal", scale)) {
+        if (menuButton(tr("Menú principal"), scale)) {
             m_confirm = Confirm::MainMenu;
         }
-        if (menuButton("Salir al escritorio", scale)) {
+        if (menuButton(tr("Salir al escritorio"), scale)) {
             m_confirm = Confirm::Quit;
         }
         ImGui::Dummy({0.0f, 4.0f * scale});
@@ -205,12 +206,13 @@ void GameApp::drawPauseMenu() {
 void GameApp::drawConfirmation() {
     const float scale = m_displayScale * m_settings.uiScale;
     if (beginCentered("##confirm", 360.0f, scale)) {
-        ImGui::TextWrapped("%s", m_confirm == Confirm::Quit ? "¿Salir al escritorio?"
-                                                            : "¿Volver al menú principal?");
-        ImGui::TextDisabled("Se perderá lo que no hayas guardado (F5).");
+        ImGui::TextWrapped("%s", m_confirm == Confirm::Quit ? tr("¿Salir al escritorio?")
+                                                            : tr("¿Volver al menú principal?"));
+        ImGui::TextDisabled("%s", tr("Se perderá lo que no hayas guardado (F5)."));
         ImGui::Dummy({0.0f, 6.0f * scale});
         const float half = (ImGui::GetContentRegionAvail().x - ImGui::GetStyle().ItemSpacing.x) * 0.5f;
-        if (ImGui::Button(m_confirm == Confirm::Quit ? "Salir" : "Volver al menú", {half, 32.0f * scale})) {
+        if (ImGui::Button(m_confirm == Confirm::Quit ? tr("Salir") : tr("Volver al menú"),
+                          {half, 32.0f * scale})) {
             if (m_confirm == Confirm::Quit) {
                 m_quit = true;
             } else {
@@ -219,7 +221,7 @@ void GameApp::drawConfirmation() {
             m_confirm = Confirm::None;
         }
         ImGui::SameLine();
-        if (ImGui::Button("Cancelar", {half, 32.0f * scale})) {
+        if (ImGui::Button(tr("Cancelar"), {half, 32.0f * scale})) {
             m_confirm = Confirm::None;
         }
     }
@@ -231,48 +233,78 @@ void GameApp::drawOptionsWindow() {
     if (beginCentered("##options", 460.0f, scale)) {
         ImGui::BeginDisabled(m_confirm != Confirm::None);
         ImGui::PushFont(nullptr, 24.0f);
-        ImGui::TextUnformatted("Opciones");
+        ImGui::TextUnformatted(tr("Opciones"));
         ImGui::PopFont();
         ImGui::Separator();
         bool changed = false;
 
-        ImGui::SeparatorText("Pantalla");
+        ImGui::SeparatorText(tr("Pantalla"));
         int mode = m_settings.fullscreen ? 1 : 0;
-        changed |= ImGui::RadioButton("Ventana", &mode, 0);
+        changed |= ImGui::RadioButton(tr("Ventana"), &mode, 0);
         ImGui::SameLine();
-        changed |= ImGui::RadioButton("Pantalla completa (F11)", &mode, 1);
+        changed |= ImGui::RadioButton(tr("Pantalla completa (F11)"), &mode, 1);
         m_settings.fullscreen = mode == 1;
-        changed |= ImGui::Checkbox("Sincronización vertical", &m_settings.vsync);
+        changed |= ImGui::Checkbox(tr("Sincronización vertical"), &m_settings.vsync);
 
-        ImGui::SeparatorText("Interfaz");
+        ImGui::SeparatorText(tr("Interfaz"));
         // Applied on release: rescaling while dragging would move the slider under the mouse.
         static float pendingScale = 0.0f;
         if (!ImGui::IsAnyItemActive()) {
             pendingScale = m_settings.uiScale * 100.0f;
         }
         ImGui::SetNextItemWidth(220.0f * scale);
-        ImGui::SliderFloat("Escala", &pendingScale, UserSettings::kMinUiScale * 100.0f,
+        ImGui::SliderFloat(tr("Escala"), &pendingScale, UserSettings::kMinUiScale * 100.0f,
                            UserSettings::kMaxUiScale * 100.0f, "%.0f %%");
         if (ImGui::IsItemDeactivatedAfterEdit()) {
             m_settings.uiScale =
                 std::clamp(pendingScale / 100.0f, UserSettings::kMinUiScale, UserSettings::kMaxUiScale);
             changed = true;
         }
-        changed |= ImGui::Checkbox("Mostrar los controles (F1) al empezar", &m_settings.showHelpOnStart);
+        changed |= ImGui::Checkbox(tr("Mostrar los controles (F1) al empezar"), &m_settings.showHelpOnStart);
 
-        ImGui::SeparatorText("Datos");
+        ImGui::SeparatorText(tr("Idioma"));
+        // Language names are shown in their own language; "auto" follows the system's.
+        const auto nameOf = [&](const std::string& code) -> std::string {
+            if (code == "auto") {
+                return tr("Automático (idioma del sistema)");
+            }
+            for (const LanguageOption& language : m_languages) {
+                if (language.code == code) {
+                    return language.name;
+                }
+            }
+            return code;
+        };
+        ImGui::SetNextItemWidth(260.0f * scale);
+        if (ImGui::BeginCombo("##language", nameOf(m_settings.language).c_str())) {
+            std::vector<std::string> codes = {"auto"};
+            for (const LanguageOption& language : m_languages) {
+                codes.push_back(language.code);
+            }
+            for (const std::string& code : codes) {
+                if (ImGui::Selectable(nameOf(code).c_str(), code == m_settings.language) &&
+                    code != m_settings.language) {
+                    m_settings.language = code;
+                    applyLanguage();
+                    saveSettings();
+                }
+            }
+            ImGui::EndCombo();
+        }
+
+        ImGui::SeparatorText(tr("Datos"));
         const std::string folder = pathToUtf8(m_dataDir);
-        ImGui::TextDisabled("Partidas, registro y preferencias:");
+        ImGui::TextDisabled("%s", tr("Partidas, registro y preferencias:"));
         ImGui::TextWrapped("%s", folder.c_str());
-        if (ImGui::SmallButton("Abrir la carpeta")) {
+        if (ImGui::SmallButton(tr("Abrir la carpeta"))) {
             const std::string url = "file:///" + folder;
             if (!SDL_OpenURL(url.c_str())) {
-                setStatus(std::string("No se pudo abrir la carpeta: ") + SDL_GetError());
+                setStatus(trf("No se pudo abrir la carpeta: {}", SDL_GetError()));
             }
         }
 
         ImGui::Dummy({0.0f, 6.0f * scale});
-        if (ImGui::Button("Volver (Esc)", {-FLT_MIN, 32.0f * scale})) {
+        if (ImGui::Button(tr("Volver (Esc)"), {-FLT_MIN, 32.0f * scale})) {
             m_showOptions = false;
         }
         ImGui::EndDisabled();

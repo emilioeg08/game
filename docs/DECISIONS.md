@@ -567,3 +567,32 @@ sustituya y explique por qué.
 - **Verificación:** el cliente se compila también en Linux con las fuentes fijadas de SDL3 3.4.16 (crate
   `sdl3-src`) y Dear ImGui 1.92.9b, y se renderiza sin ventana (`SDL_VIDEO_DRIVER=offscreen`, renderizador
   software). Así se revisaron capturas de cada menú; en Windows lo comprueba la CI.
+
+## ADR-036 — Localización: el español como fuente, catálogos PO y una simulación sin idioma
+
+- **Contexto:** para vender en Steam hace falta al menos el inglés. Los textos estaban escritos en español
+  por todo el código, y el diario los generaba en la simulación: su texto formaba parte del guardado y del
+  hash de estado.
+- **Decisión:**
+  - **El español es el idioma fuente** y cada texto es su propia clave (al estilo gettext). Los demás
+    idiomas son catálogos PO en `data/lang/<código>.po`, junto al ejecutable. El formato es estándar y
+    funciona con Poedit, Weblate y los traductores profesionales.
+  - `Engine/Text/Localization.h`: `tr()` y `trf()` para la interfaz; `Catalog`, que lee PO, y
+    `formatPattern`, un formateador que nunca lanza.
+  - **Una traducción rota nunca rompe el juego.** Al cargar el catálogo, una traducción cuyos marcadores
+    (`%s`, `%.0f`, `{}`, `{1}`, `{:.2f}`...) difieren de los del original se rechaza y se muestra el español.
+    `trf()` también cae al original si el formato falla.
+  - **La simulación no traduce.** El diario guarda un `Message` (patrón y argumentos: literales, términos
+    traducibles o nombres propios) y se traduce al mostrarlo. El guardado y el hash no dependen del idioma,
+    y cambiar de idioma traduce también lo ya escrito. Los títulos de las estaciones ("Estación", "Puerto"...)
+    se traducen dentro de los nombres propios.
+  - **Idioma:** en Opciones, "Automático" (el del sistema: español si el sistema está en español, inglés
+    en cualquier otro caso), "Español" o cualquier catálogo instalado, con su nombre en su propio idioma.
+    Se guarda en `settings.ini`.
+  - `tools/i18n.py`: `extract` (plantilla `.pot`), `update` (añade los textos nuevos a un catálogo) y
+    `check` (en la CI: todo traducido y con marcadores compatibles, con las mismas reglas que el juego).
+  - Tests: el formateador, el lector PO y el rechazo de traducciones incompatibles; `en.po` carga sin
+    rechazos; y todo lo que el diario escribe en 6 horas con piratas está traducido.
+- **Consecuencias:** los textos de registro (logs) y del headless siguen en inglés técnico. El headless
+  escribe el diario en español o en el idioma de `--lang`. Añadir un idioma consiste en copiar `en.po`,
+  traducir y ejecutar `check`.

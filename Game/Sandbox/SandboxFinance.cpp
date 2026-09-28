@@ -115,12 +115,10 @@ void Sandbox::onTraderLost(World& world, EntityId ship, SimTime now) {
     const i64 insured = finance.hullValue;
     const i64 claim = m_mutual.pay(insured);
     if (claim < insured) {
-        addJournal(
-            now,
-            std::format("Noticias: la Mutua de Fletadores solo puede pagar {} de los {} cr del casco de "
-                        "{}.",
-                        claim, insured, nameOf(world, ship)),
-            JournalKind::News);
+        addJournal(now,
+                   msg("Noticias: la Mutua de Fletadores solo puede pagar {} de los {} cr del casco de {}.",
+                       number(claim), number(insured), named(world, ship)),
+                   JournalKind::News);
     }
     const std::string name = nameOf(world, ship);
     const i64 equity = settleEstate(world, ship, claim);
@@ -132,7 +130,7 @@ void Sandbox::onTraderLost(World& world, EntityId ship, SimTime now) {
         m_bank.withdraw(equity);
         m_stats.capitalOut += equity;
         ++m_stats.ownersRetired;
-        addJournal(now, std::format("Noticias: {} pierde su carguero y no puede comprar otro.", name),
+        addJournal(now, msg("Noticias: {} pierde su carguero y no puede comprar otro.", literal(name)),
                    JournalKind::News);
     }
 }
@@ -151,10 +149,9 @@ void Sandbox::repossess(World& world, EntityId ship, SimTime now) {
     m_stats.capitalOut += equity;
     ++m_stats.repossessions;
     addJournal(now,
-               debt > 0 ? std::format("Noticias: el banco embarga el carguero de {} (deuda {} cr, pérdida {} "
-                                      "cr).",
-                                      nameOf(world, ship), debt, m_bank.writtenOff - lostBefore)
-                        : std::format("Noticias: {} vende su carguero.", nameOf(world, ship)),
+               debt > 0 ? msg("Noticias: el banco embarga el carguero de {} (deuda {} cr, pérdida {} cr).",
+                              named(world, ship), number(debt), number(m_bank.writtenOff - lostBefore))
+                        : msg("Noticias: {} vende su carguero.", named(world, ship)),
                JournalKind::News);
 }
 
@@ -275,11 +272,14 @@ void Sandbox::updateFinance(const TickContext& context) {
     if (m_announcedPremium <= 0.0 ||
         std::abs(premium - m_announcedPremium) >= content::kPremiumNewsChange * m_announcedPremium) {
         if (m_announcedPremium > 0.0) {
-            addJournal(now,
-                       std::format("Noticias: la Mutua de Fletadores {} la prima del casco a {:.0f} cr/h por "
-                                   "carguero.",
-                                   premium > m_announcedPremium ? "sube" : "baja", premium),
-                       JournalKind::News);
+            addJournal(
+                now,
+                premium > m_announcedPremium
+                    ? msg("Noticias: la Mutua de Fletadores sube la prima del casco a {} cr/h por carguero.",
+                          number(premium, 0))
+                    : msg("Noticias: la Mutua de Fletadores baja la prima del casco a {} cr/h por carguero.",
+                          number(premium, 0)),
+                JournalKind::News);
         }
         m_announcedPremium = premium;
     }
@@ -298,8 +298,8 @@ void Sandbox::reviewShipPurchase(World& world, SimTime now) {
         m_stats.capitalOut += it->equity;
         ++m_stats.ownersRetired;
         addJournal(now,
-                   std::format("Noticias: {} no consigue crédito para otro carguero y abandona el sistema.",
-                               it->name),
+                   msg("Noticias: {} no consigue crédito para otro carguero y abandona el sistema.",
+                       literal(it->name)),
                    JournalKind::News);
         it = m_buyers.erase(it);
     }
@@ -341,9 +341,9 @@ void Sandbox::reviewShipPurchase(World& world, SimTime now) {
         buyHauler(world, now, buyer.name, buyer.equity, loan);
         ++m_stats.shipsByReturningOwners;
         addJournal(now,
-                   loan > 0 ? std::format("Noticias: {} vuelve con un carguero nuevo (crédito de {} cr).",
-                                          buyer.name, loan)
-                            : std::format("Noticias: {} vuelve con un carguero nuevo.", buyer.name),
+                   loan > 0 ? msg("Noticias: {} vuelve con un carguero nuevo (crédito de {} cr).",
+                                  literal(buyer.name), number(loan))
+                            : msg("Noticias: {} vuelve con un carguero nuevo.", literal(buyer.name)),
                    JournalKind::News);
         bought = true;
     }
@@ -375,8 +375,8 @@ void Sandbox::reviewShipPurchase(World& world, SimTime now) {
             const EntityId ship = buyHauler(world, now, std::move(name), invested, 0);
             ++m_stats.shipsByExpansion;
             addJournal(now,
-                       std::format("Noticias: {} invierte sus ahorros en un segundo carguero, {}.",
-                                   nameOf(world, richest), nameOf(world, ship)),
+                       msg("Noticias: {} invierte sus ahorros en un segundo carguero, {}.",
+                           named(world, richest), named(world, ship)),
                        JournalKind::News);
             bought = true;
         }
@@ -392,23 +392,26 @@ void Sandbox::reviewShipPurchase(World& world, SimTime now) {
         const EntityId ship = buyHauler(world, now, haulerName(rng, static_cast<u32>(m_stats.spawns)),
                                         content::kNewcomerSavings, loan);
         ++m_stats.shipsByOutsiders;
-        addJournal(
-            now,
-            std::format("{} llega al sistema con un carguero financiado por el banco.", nameOf(world, ship)),
-            JournalKind::Traffic);
+        addJournal(now,
+                   msg("{} llega al sistema con un carguero financiado por el banco.", named(world, ship)),
+                   JournalKind::Traffic);
         bought = true;
     }
 
     // Credit conditions make the news when the business stops (or starts again) paying for new ships.
-    const bool open = bought || viable(loan);
+    // With some hysteresis, so the news does not flicker around the threshold: once open, it stays open
+    // while the surplus still covers the debt service at all.
+    const f64 surplus = earnings - premium;
+    const bool open =
+        m_creditOpen ? surplus > 0.0 && surplus >= static_cast<f64>(debtServicePerHour(loan)) : viable(loan);
     if (open != m_creditOpen) {
         m_creditOpen = open;
         addJournal(
             now,
-            open ? "Noticias: el banco vuelve a financiar cargueros."
-                 : std::format("Noticias: el banco deja de financiar cargueros: se espera que ganen {:.0f} "
-                               "cr/h, {:.0f} tras la prima, y la deuda costaría {}.",
-                               earnings, earnings - premium, debtServicePerHour(loan)),
+            open ? msg("Noticias: el banco vuelve a financiar cargueros.")
+                 : msg("Noticias: el banco deja de financiar cargueros: se espera que ganen {} cr/h, {} tras "
+                       "la prima, y la deuda costaría {}.",
+                       number(earnings, 0), number(earnings - premium, 0), number(debtServicePerHour(loan))),
             JournalKind::News);
     }
 }

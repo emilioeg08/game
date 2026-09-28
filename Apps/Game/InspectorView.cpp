@@ -1,5 +1,7 @@
 #include "Apps/Game/InspectorView.h"
 
+#include "Engine/Text/Localization.h"
+
 #include "Simulation/World/World.h"
 
 #include <imgui.h>
@@ -14,10 +16,10 @@ EntityId InspectorView::draw(const World& world, EntityId entity) {
     m_clicked = {};
     m_widgetId = 0;
     if (!world.isAlive(entity)) {
-        ImGui::TextDisabled("(la entidad ya no existe)");
+        ImGui::TextDisabled("%s", tr("(la entidad ya no existe)"));
         return {};
     }
-    ImGui::TextDisabled("Entidad #%u (generación %u)", entity.index, entity.generation);
+    ImGui::TextDisabled(tr("Entidad #%u (generación %u)"), entity.index, entity.generation);
     world.inspect(entity, *this);
     return m_clicked;
 }

@@ -5,6 +5,7 @@
 #include "Engine/Core/Log.h"
 #include "Engine/Core/Random.h"
 #include "Engine/Serialization/Binary.h"
+#include "Engine/Text/Localization.h"
 #include "Game/Sandbox/Content.h"
 #include "Simulation/Kernel/Simulation.h"
 #include "Space/Bodies/CelestialBody.h"
@@ -14,6 +15,7 @@
 #include <algorithm>
 #include <cmath>
 #include <format>
+#include <optional>
 
 namespace gx {
 namespace {
@@ -264,7 +266,7 @@ void Sandbox::populate(Simulation& simulation) {
         m_traderPrices.observe(port, market, m_economy.goods(), now);
         m_playerPrices.observe(port, market, m_economy.goods(), now);
     }
-    addJournal(now, std::format("Comienza la partida en el sistema {}.", m_systemName));
+    addJournal(now, msg("Comienza la partida en el sistema {}.", properName(m_systemName)));
 }
 
 EntityId Sandbox::spawnShip(World& world, SimTime now, Rng& rng, std::string name, u32 faction, u32 shipClass,
@@ -621,10 +623,9 @@ void Sandbox::planHaulerTrip(World& world, EntityId ship, HaulerBrain& brain, Sh
             contract->state = ContractState::Accepted;
             contract->holderFaction = content::kFactionIndependent;
             contract->holder = ship;
-            addJournal(now,
-                       std::format("{} acepta el contrato de suministro: {}.", nameOf(world, ship),
-                                   describe(*contract)),
-                       JournalKind::Traffic);
+            addJournal(
+                now, msg("{} acepta el contrato de suministro: {}.", named(world, ship), describe(*contract)),
+                JournalKind::Traffic);
         }
     }
     control.mode = FlightMode::Approach;
@@ -1004,7 +1005,7 @@ void Sandbox::updateUpkeep(const TickContext& context) {
                 m_stats.cargoLost[item.good] += item.tonnes; // leaves the system with the ship
             }
         }
-        addJournal(now, std::format("Noticias: {} quiebra y abandona el sistema.", nameOf(world, ship)),
+        addJournal(now, msg("Noticias: {} quiebra y abandona el sistema.", named(world, ship)),
                    JournalKind::News);
         repossess(world, ship, now);
         world.destroyEntity(ship);
@@ -1030,7 +1031,7 @@ void Sandbox::updateUpkeep(const TickContext& context) {
                              content::kShipClassCourier, m_home);
         world.components<Wallet>().get(m_player).credits = m_playerCredits;
         ++m_stats.spawns;
-        addJournal(now, std::format("Una nave nueva te espera en {}.", nameOf(world, m_home)));
+        addJournal(now, msg("Una nave nueva te espera en {}.", named(world, m_home)));
     }
     // With finance, new traders buy their ships (Game.Finance); without it, they appear with fresh capital.
     if (!m_config.finance && world.components<HaulerBrain>().size() < m_config.haulers &&
@@ -1059,26 +1060,24 @@ void Sandbox::onShipArrived(const ShipArrived& event, const TickContext& context
         const auto dwellSpanMs = static_cast<u32>((m_config.maxDwell - m_config.minDwell).count() / 1000);
         brain->departAt =
             context.now + m_config.minDwell + SimDuration::milliseconds(rng.uniformU32(dwellSpanMs + 1));
-        addJournal(context.now,
-                   std::format("{} atraca en {}.", nameOf(world, event.ship), nameOf(world, event.target)),
+        addJournal(context.now, msg("{} atraca en {}.", named(world, event.ship), named(world, event.target)),
                    JournalKind::Traffic);
     } else if (event.ship == m_player) {
-        addJournal(context.now, event.target.isValid()
-                                    ? std::format("{} ha llegado a {}.", nameOf(world, event.ship),
-                                                  nameOf(world, event.target))
-                                    : std::format("{} ha llegado a su destino.", nameOf(world, event.ship)));
+        addJournal(context.now,
+                   event.target.isValid()
+                       ? msg("{} ha llegado a {}.", named(world, event.ship), named(world, event.target))
+                       : msg("{} ha llegado a su destino.", named(world, event.ship)));
         if (const Market* market = world.components<Market>().tryGet(event.target)) {
             m_playerPrices.observe(event.target, *market, m_economy.goods(), context.now);
             // Stations publish the traders' price bulletin.
             const CelestialBody* body = world.components<CelestialBody>().tryGet(event.target);
             if (body != nullptr && body->kind == BodyKind::Station && hostile()) {
                 addJournal(context.now,
-                           "La estación no te da su boletín de precios: tu reputación es hostil.");
+                           msg("La estación no te da su boletín de precios: tu reputación es hostil."));
             } else if (body != nullptr && body->kind == BodyKind::Station) {
                 if (const u32 updated = m_playerPrices.mergeNewer(m_traderPrices); updated > 0) {
-                    addJournal(
-                        context.now,
-                        std::format("Boletín de precios de la estación: {} puertos actualizados.", updated));
+                    addJournal(context.now, msg("Boletín de precios de la estación: {} puertos actualizados.",
+                                                number(updated)));
                 }
             }
         }
@@ -1091,12 +1090,12 @@ void Sandbox::onHyperspaceTransition(const HyperspaceTransition& event, const Ti
     }
     const ShipControl* control = context.world.components<ShipControl>().tryGet(event.ship);
     if (event.entering) {
-        addJournal(context.now, "Salto al hiperespacio.");
+        addJournal(context.now, msg("Salto al hiperespacio."));
     } else if (control != nullptr && control->mode == FlightMode::Approach) {
-        addJournal(context.now, std::format("Salida del hiperespacio cerca de {}.",
-                                            nameOf(context.world, control->target)));
+        addJournal(context.now,
+                   msg("Salida del hiperespacio cerca de {}.", named(context.world, control->target)));
     } else {
-        addJournal(context.now, "Salida del hiperespacio.");
+        addJournal(context.now, msg("Salida del hiperespacio."));
     }
 }
 
@@ -1123,21 +1122,20 @@ void Sandbox::onShipDamaged(const ShipDamaged& event, const TickContext& context
             changeReputation(victim->faction == content::kFactionAuthority
                                  ? content::kReputationAttackAuthority
                                  : content::kReputationHit);
-            addJournal(context.now,
-                       std::format("Los comerciantes te identifican atacando a {}: reputación {:.0f}.",
-                                   victim->name, m_reputation));
+            addJournal(context.now, msg("Los comerciantes te identifican atacando a {}: reputación {}.",
+                                        literal(victim->name), number(m_reputation, 0)));
         } else {
-            addJournal(context.now, std::format("Atacas a {} sin que nadie te identifique.", victim->name));
+            addJournal(context.now, msg("Atacas a {} sin que nadie te identifique.", literal(victim->name)));
         }
     }
     if (event.ship == m_player) {
         if (context.now - m_lastPlayerHit > kHitJournalGap) {
-            addJournal(context.now, "¡Impacto! La nave está bajo fuego.");
+            addJournal(context.now, msg("¡Impacto! La nave está bajo fuego."));
         }
         m_lastPlayerHit = context.now;
         m_combatAlertUntil = context.now + m_config.combatAlert;
         if (event.moduleDestroyed) {
-            addJournal(context.now, std::format("Módulo fuera de servicio: {}.", moduleName(event.module)));
+            addJournal(context.now, msg("Módulo fuera de servicio: {}.", term(moduleName(event.module))));
         }
         updateFlightRate(world, context.now);
         return;
@@ -1186,19 +1184,19 @@ void Sandbox::onShipDestroyed(const ShipDestroyed& event, const TickContext& con
         if (const Wallet* wallet = world.components<Wallet>().tryGet(event.ship)) {
             m_playerCredits = wallet->credits; // insured: the money survives the ship
         }
-        addJournal(now, event.reactorBreach ? "¡Brecha en el reactor! Tu nave ha sido destruida."
-                                            : "Tu nave ha sido destruida.");
+        addJournal(now, event.reactorBreach ? msg("¡Brecha en el reactor! Tu nave ha sido destruida.")
+                                            : msg("Tu nave ha sido destruida."));
         ++m_stats.playerDeaths;
         if (hostile()) {
             m_reputation = content::kReputationAfterDeath; // justice is done: no longer wanted
-            addJournal(now, "Tu cuenta con la Autoridad queda saldada: ya no te buscan.");
+            addJournal(now, msg("Tu cuenta con la Autoridad queda saldada: ya no te buscan."));
         }
         m_player = {};
         m_playerRespawnAt = now + m_config.playerRespawnDelay;
         return;
     }
     if (event.attacker.isValid() && event.attacker == m_player) {
-        addJournal(now, "Objetivo destruido.");
+        addJournal(now, msg("Objetivo destruido."));
         if (const ShipIdentity* victim = world.components<ShipIdentity>().tryGet(event.ship)) {
             if (victim->faction == content::kFactionPirates) {
                 changeReputation(content::kReputationPirateKill);
@@ -1206,14 +1204,13 @@ void Sandbox::onShipDestroyed(const ShipDestroyed& event, const TickContext& con
             } else if (victim->faction == content::kFactionAuthority &&
                        witnessedBy(content::kFactionAuthority, m_player)) {
                 changeReputation(content::kReputationKillAuthority);
-                addJournal(
-                    now, std::format("La Autoridad sabe que destruiste el patrullero {}: reputación {:.0f}.",
-                                     victim->name, m_reputation));
+                addJournal(now, msg("La Autoridad sabe que destruiste el patrullero {}: reputación {}.",
+                                    literal(victim->name), number(m_reputation, 0)));
             } else if (victim->faction == content::kFactionIndependent &&
                        witnessedBy(content::kFactionIndependent, m_player)) {
                 changeReputation(content::kReputationKill);
-                addJournal(now, std::format("Los comerciantes saben que destruiste a {}: reputación {:.0f}.",
-                                            victim->name, m_reputation));
+                addJournal(now, msg("Los comerciantes saben que destruiste a {}: reputación {}.",
+                                    literal(victim->name), number(m_reputation, 0)));
             }
         }
     }
@@ -1288,11 +1285,11 @@ void Sandbox::onPilotCommand(const PilotCommand& command, const TickContext& con
     control.track = 0;
 
     if (command.mode == FlightMode::Approach) {
-        addJournal(context.now, std::format("Rumbo a {}.", nameOf(world, command.target)));
+        addJournal(context.now, msg("Rumbo a {}.", named(world, command.target)));
     } else if (command.mode == FlightMode::MoveTo) {
-        addJournal(context.now, "Rumbo a un punto del espacio.");
+        addJournal(context.now, msg("Rumbo a un punto del espacio."));
     } else if (command.mode == FlightMode::Stop) {
-        addJournal(context.now, "Deteniendo la nave.");
+        addJournal(context.now, msg("Deteniendo la nave."));
     }
     updateFlightRate(world, context.now);
 }
@@ -1310,14 +1307,14 @@ void Sandbox::onSensorCommand(const SensorCommand& command, const TickContext& c
     const bool radarAvailable = suite->activeStrength > 0.0;
     if (command.activeOn != suite->activeOn && (radarAvailable || !command.activeOn)) {
         suite->activeOn = command.activeOn;
-        addJournal(context.now, suite->activeOn ? "Radar activado: ves más, pero todos te ven a ti."
-                                                : "Radar desactivado.");
+        addJournal(context.now, suite->activeOn ? msg("Radar activado: ves más, pero todos te ven a ti.")
+                                                : msg("Radar desactivado."));
     }
     if (command.transponderOn != suite->transponderOn) {
         suite->transponderOn = command.transponderOn;
         addJournal(context.now, suite->transponderOn
-                                    ? "Transpondedor encendido."
-                                    : "Transpondedor apagado: tu identidad ya no se difunde.");
+                                    ? msg("Transpondedor encendido.")
+                                    : msg("Transpondedor apagado: tu identidad ya no se difunde."));
     }
 }
 
@@ -1349,11 +1346,11 @@ void Sandbox::onEngageCommand(const EngageCommand& command, const TickContext& c
         control.standoff = content::kPlayerPursuitStandoff;
     }
     if (command.fire) {
-        addJournal(context.now, std::format("Fuego sobre el contacto {}.", command.track));
+        addJournal(context.now, msg("Fuego sobre el contacto {}.", number(command.track)));
     } else if (command.pursue) {
-        addJournal(context.now, std::format("Interceptando el contacto {}.", command.track));
+        addJournal(context.now, msg("Interceptando el contacto {}.", number(command.track)));
     } else if (previous != 0) {
-        addJournal(context.now, "Alto el fuego.");
+        addJournal(context.now, msg("Alto el fuego."));
     }
     updateFlightRate(world, context.now);
 }
@@ -1364,7 +1361,7 @@ void Sandbox::onTradeCommand(const TradeCommand& command, const TickContext& con
         ++m_stats.commandsRejected;
         GX_LOG_WARN("Sandbox", "trade command rejected: {}", reason);
         if (message != nullptr) {
-            addJournal(context.now, message);
+            addJournal(context.now, msg(message));
         }
     };
     const ShipIdentity* identity =
@@ -1378,33 +1375,34 @@ void Sandbox::onTradeCommand(const TradeCommand& command, const TickContext& con
     }
     const EntityId port = dockedPort(world, command.ship);
     if (!port.isValid()) {
-        reject("not docked at a port", "Para comerciar hay que estar atracado en un puerto.");
+        reject("not docked at a port", GX_TEXT("Para comerciar hay que estar atracado en un puerto."));
         return;
     }
     if (hostile()) {
-        reject("hostile reputation", "El puerto se niega a comerciar contigo: tu reputación es hostil.");
+        reject("hostile reputation",
+               GX_TEXT("El puerto se niega a comerciar contigo: tu reputación es hostil."));
         return;
     }
     Market& market = world.components<Market>().get(port);
     MarketGood* good = market.find(command.good);
     if (good == nullptr || command.tonnes == 0) {
-        reject("good not traded here", "Ese bien no se comercia en este puerto.");
+        reject("good not traded here", GX_TEXT("Ese bien no se comercia en este puerto."));
         return;
     }
-    const std::string& name = m_economy.goods()[command.good].name;
+    const Message name = term(m_economy.goods()[command.good].name);
     const f64 base = m_economy.basePrice(command.good);
     if (command.tonnes > 0) {
         const TradeResult bought =
             buyGoods(*good, base, static_cast<u32>(command.tonnes), *hold, *wallet, content::kTradeTaxRate);
         if (bought.tonnes == 0) {
-            reject("cannot buy", hold->space() == 0  ? "La bodega está llena."
-                                 : good->stock < 1.0 ? "No quedan existencias."
-                                                     : "No tienes créditos suficientes.");
+            reject("cannot buy", hold->space() == 0  ? GX_TEXT("La bodega está llena.")
+                                 : good->stock < 1.0 ? GX_TEXT("No quedan existencias.")
+                                                     : GX_TEXT("No tienes créditos suficientes."));
             return;
         }
         collectTax(bought.tax);
-        addJournal(context.now, std::format("Compras {} t de {} por {} cr (+{} cr de impuestos).",
-                                            bought.tonnes, name, bought.credits, bought.tax));
+        addJournal(context.now, msg("Compras {} t de {} por {} cr (+{} cr de impuestos).",
+                                    number(bought.tonnes), name, number(bought.credits), number(bought.tax)));
     } else {
         const TradeResult sold =
             sellGoods(*good, base, static_cast<u32>(-command.tonnes), *hold, *wallet, content::kTradeTaxRate);
@@ -1414,8 +1412,8 @@ void Sandbox::onTradeCommand(const TradeCommand& command, const TickContext& con
             return;
         }
         collectTax(sold.tax);
-        addJournal(context.now, std::format("Vendes {} t de {} por {} cr (-{} cr de impuestos).", sold.tonnes,
-                                            name, sold.credits, sold.tax));
+        addJournal(context.now, msg("Vendes {} t de {} por {} cr (-{} cr de impuestos).", number(sold.tonnes),
+                                    name, number(sold.credits), number(sold.tax)));
     }
     ++m_stats.playerTrades;
     m_playerPrices.observe(port, market, m_economy.goods(), context.now);
@@ -1426,7 +1424,7 @@ void Sandbox::onBoardCommand(const BoardCommand& command, const TickContext& con
     const auto reject = [&](const char* reason, const char* message) {
         ++m_stats.commandsRejected;
         GX_LOG_WARN("Sandbox", "board command rejected: {}", reason);
-        addJournal(context.now, message);
+        addJournal(context.now, msg(message));
     };
     const ShipIdentity* identity =
         world.isAlive(command.ship) ? world.components<ShipIdentity>().tryGet(command.ship) : nullptr;
@@ -1434,53 +1432,54 @@ void Sandbox::onBoardCommand(const BoardCommand& command, const TickContext& con
     const ShipModules* modules = world.components<ShipModules>().tryGet(command.ship);
     if (identity == nullptr || identity->faction != content::kFactionPlayer || hold == nullptr ||
         modules == nullptr || !hasPower(*modules)) {
-        reject("not a working ship of the player", "Tu nave no está en condiciones de abordar a nadie.");
+        reject("not a working ship of the player",
+               GX_TEXT("Tu nave no está en condiciones de abordar a nadie."));
         return;
     }
     const SensorContact* contact = m_sensors.findContact(content::kFactionPlayer, command.track);
     if (contact == nullptr || contact->ghost || !world.isAlive(contact->target)) {
-        reject("no ship there", "No encuentras ninguna nave en esa posición.");
+        reject("no ship there", GX_TEXT("No encuentras ninguna nave en esa posición."));
         return;
     }
     const EntityId victim = contact->target;
     const Kinematics& mine = world.components<Kinematics>().get(command.ship);
     const Kinematics& theirs = world.components<Kinematics>().get(victim);
     if (length(theirs.position - mine.position) > content::kBoardingRange) {
-        reject("too far", "Demasiado lejos para abordar: acércate a menos de 5 km.");
+        reject("too far", GX_TEXT("Demasiado lejos para abordar: acércate a menos de 5 km."));
         return;
     }
     if (length(theirs.velocity - mine.velocity) > content::kBoardingSpeed) {
-        reject("too fast", "Iguala la velocidad con la otra nave para abordarla.");
+        reject("too fast", GX_TEXT("Iguala la velocidad con la otra nave para abordarla."));
         return;
     }
     const ShipModules* victimModules = world.components<ShipModules>().tryGet(victim);
     if (victimModules == nullptr || hasPower(*victimModules)) {
-        reject("still powered", "La nave resiste: no se puede abordar mientras tenga energía.");
+        reject("still powered", GX_TEXT("La nave resiste: no se puede abordar mientras tenga energía."));
         return;
     }
 
     // Take what fits; the rest is lost with the abandoned hull.
-    std::string loot;
+    std::optional<Message> loot;
     if (CargoHold* victimHold = world.components<CargoHold>().tryGet(victim)) {
         for (const CargoItem& item : victimHold->items) {
             const u32 taken = std::min(item.tonnes, hold->space());
             hold->add(item.good, taken);
             m_stats.cargoLost[item.good] += item.tonnes - taken;
             if (taken > 0) {
-                loot += std::format("{}{} t de {}", loot.empty() ? "" : ", ", taken,
-                                    m_economy.goods()[item.good].name);
+                Message part = msg("{} t de {}", number(taken), term(m_economy.goods()[item.good].name));
+                loot = loot.has_value() ? msg("{}, {}", std::move(*loot), std::move(part)) : std::move(part);
             }
         }
     }
     const ShipIdentity& victimIdentity = world.components<ShipIdentity>().get(victim);
     addJournal(context.now,
-               std::format("Abordas {}: {}. La tripulación abandona la nave.", victimIdentity.name,
-                           loot.empty() ? "no lleva carga" : "te llevas " + loot));
+               msg("Abordas {}: {}. La tripulación abandona la nave.", literal(victimIdentity.name),
+                   loot.has_value() ? msg("te llevas {}", *loot) : msg("no lleva carga")));
     ++m_stats.boardings;
     if (victimIdentity.faction == content::kFactionIndependent) {
         onTraderLost(world, victim, context.now);       // a captured hull is a loss for the mutual too
         changeReputation(content::kReputationBoarding); // they always know who boarded them
-        addJournal(context.now, std::format("Los comerciantes lo saben: reputación {:.0f}.", m_reputation));
+        addJournal(context.now, msg("Los comerciantes lo saben: reputación {}.", number(m_reputation, 0)));
         m_nextHaulerSpawn = std::max(m_nextHaulerSpawn, context.now + m_config.haulerRespawnDelay);
     } else if (victimIdentity.faction == content::kFactionPirates) {
         changeReputation(content::kReputationPirateKill);
@@ -1521,8 +1520,8 @@ void Sandbox::updateAuthority(const TickContext& context) {
             retired = port != nullptr && port->kind == BodyKind::Station ? patrol : retired;
         }
         addJournal(now,
-                   std::format("Noticias: la Autoridad da de baja el patrullero {} por falta de fondos.",
-                               nameOf(world, retired)),
+                   msg("Noticias: la Autoridad da de baja el patrullero {} por falta de fondos.",
+                       named(world, retired)),
                    JournalKind::News);
         world.destroyEntity(retired);
         ++m_stats.patrolsDecommissioned;
@@ -1538,10 +1537,9 @@ void Sandbox::updateAuthority(const TickContext& context) {
         const EntityId patrol = spawnPatrol(world, now, rng, static_cast<u32>(m_stats.patrolsCommissioned));
         m_treasury -= content::kPatrolCommissionCost;
         ++m_stats.patrolsCommissioned;
-        addJournal(
-            now,
-            std::format("Noticias: la Autoridad pone en servicio el patrullero {}.", nameOf(world, patrol)),
-            JournalKind::News);
+        addJournal(now,
+                   msg("Noticias: la Autoridad pone en servicio el patrullero {}.", named(world, patrol)),
+                   JournalKind::News);
     }
 }
 
@@ -1672,8 +1670,8 @@ void Sandbox::updatePatrols(const TickContext& context) {
                 orders.targetTrack = best->trackId;
                 if (best->level == ContactLevel::Identified && best->faction == content::kFactionPlayer) {
                     ++m_stats.wantedChases;
-                    addJournal(now, std::format("La Autoridad te busca: el patrullero {} va a por ti.",
-                                                nameOf(world, ship)));
+                    addJournal(
+                        now, msg("La Autoridad te busca: el patrullero {} va a por ti.", named(world, ship)));
                 }
             } else if (call != nullptr &&
                        (control.mode != FlightMode::MoveTo || control.point != call->position)) {
@@ -1739,7 +1737,7 @@ void Sandbox::changeReputation(f64 delta) {
 void Sandbox::payBounty(World& world, const std::string& name, SimTime now) {
     const i64 bounty = std::min(content::kPirateBounty, m_treasury);
     if (bounty <= 0) {
-        addJournal(now, std::format("La Autoridad no tiene fondos para pagar la recompensa por {}.", name));
+        addJournal(now, msg("La Autoridad no tiene fondos para pagar la recompensa por {}.", literal(name)));
         return;
     }
     m_treasury -= bounty;
@@ -1749,7 +1747,7 @@ void Sandbox::payBounty(World& world, const std::string& name, SimTime now) {
     } else {
         m_playerCredits += bounty;
     }
-    addJournal(now, std::format("Recompensa de la Autoridad: {} cr por {}.", bounty, name));
+    addJournal(now, msg("Recompensa de la Autoridad: {} cr por {}.", number(bounty), literal(name)));
 }
 
 void Sandbox::collectTax(i64 tax) {
@@ -1776,7 +1774,11 @@ void Sandbox::updateFlightRate(const World& world, SimTime now) {
     }
 }
 
-void Sandbox::addJournal(SimTime time, std::string text, JournalKind kind) {
+Message Sandbox::named(const World& world, EntityId entity) const {
+    return properName(nameOf(world, entity));
+}
+
+void Sandbox::addJournal(SimTime time, Message text, JournalKind kind) {
     m_journal.push_back({time, std::move(text), kind});
     if (m_journal.size() > kJournalCapacity) {
         // Traffic goes first: it must not push out what happened to the player.

@@ -1,6 +1,7 @@
 #include "Tests/TestFramework.h"
 
 #include "Engine/Jobs/JobSystem.h"
+#include "Engine/Text/Localization.h"
 #include "Game/Presentation/SystemSnapshot.h"
 #include "Game/Sandbox/Content.h"
 #include "Game/Sandbox/Sandbox.h"
@@ -9,7 +10,12 @@
 #include "Space/Bodies/CelestialBody.h"
 
 #include <cmath>
+#include <cstdio>
+#include <filesystem>
+#include <fstream>
+#include <iterator>
 #include <limits>
+#include <set>
 #include <string>
 #include <utility>
 #include <vector>
@@ -43,7 +49,7 @@ struct Session {
     }
     [[nodiscard]] bool journalContains(const std::string& text) const {
         for (const JournalEntry& entry : sandbox.journal()) {
-            if (entry.text.find(text) != std::string::npos) {
+            if (render(entry.text, nullptr).find(text) != std::string::npos) {
                 return true;
             }
         }
@@ -1291,4 +1297,62 @@ GX_TEST(Sandbox, PeacefulTradeAttractsInvestment) {
     GX_EXPECT(session.sandbox.premiumPerHour() < content::kClaimCostPrior); // a clean record lowers the price
     GX_EXPECT(session.journalContains("carguero"));
     expectBooksBalance(session);
+}
+
+// --- Localization (ADR-036)
+// ---------------------------------------------------------------------------------
+
+namespace {
+
+Catalog loadEnglish() {
+    std::ifstream in(std::filesystem::path(GX_SOURCE_DATA_DIR) / "lang" / "en.po", std::ios::binary);
+    const std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    Catalog catalog;
+    std::string error;
+    GX_CHECK(catalog.loadPo(text, error), "en.po: {}", error);
+    return catalog;
+}
+
+} // namespace
+
+GX_TEST(Sandbox, EnglishCatalogLoadsWhole) {
+    const Catalog english = loadEnglish();
+    GX_EXPECT(english.language() == "en");
+    GX_EXPECT(english.size() > 300u);
+    for (const Catalog::Rejected& rejected : english.rejected()) {
+        std::printf("rejected: %s -> %s\n", rejected.source.c_str(), rejected.translation.c_str());
+    }
+    GX_EXPECT(english.rejected().empty());
+}
+
+GX_TEST(Sandbox, EverythingTheJournalSaysIsTranslated) {
+    // What the simulation records comes from many places; every pattern and term must be in the catalog.
+    const Catalog english = loadEnglish();
+    SandboxConfig config;
+    config.pirates = 6;
+    Session session(3, config);
+    session.sandbox.populate(session.simulation);
+    std::set<std::string> missing;
+    usize checked = 0;
+    for (int step = 0; step < 6 * 12; ++step) { // 6 h, looking every 5 min (the journal keeps 200 entries)
+        session.simulation.runFor(SimDuration::minutes(5));
+        for (const JournalEntry& entry : session.sandbox.journal()) {
+            std::vector<std::string> sources;
+            collectSources(entry.text, sources);
+            for (const std::string& source : sources) {
+                ++checked;
+                if (english.find(source) == nullptr) {
+                    missing.insert(source);
+                }
+            }
+        }
+    }
+    for (const std::string& source : missing) {
+        std::printf("untranslated: %s\n", source.c_str());
+    }
+    GX_EXPECT(missing.empty());
+    GX_EXPECT(checked > 1'000u);
+    // And what the player reads is English: no Spanish pattern left in a rendered entry.
+    const std::string rendered = render(session.sandbox.journal().back().text, &english);
+    GX_EXPECT(rendered.find("Noticias") == std::string::npos);
 }

@@ -4,6 +4,7 @@
 #include "Game/Sandbox/Sandbox.h"
 
 #include "Engine/Core/Log.h"
+#include "Engine/Text/Localization.h"
 #include "Simulation/Kernel/Simulation.h"
 #include "Space/Bodies/CelestialBody.h"
 
@@ -45,14 +46,14 @@ const char* toString(ContractState state) {
     return "?";
 }
 
-std::string Sandbox::describe(const Contract& contract) const {
+Message Sandbox::describe(const Contract& contract) const {
     const World& world = m_simulation->world();
     if (contract.kind == ContractKind::Delivery) {
-        return std::format("{} t de {} a {}", contract.tonnes, m_economy.goods()[contract.good].name,
-                           nameOf(world, contract.port));
+        return msg("{} t de {} a {}", number(contract.tonnes), term(m_economy.goods()[contract.good].name),
+                   named(world, contract.port));
     }
-    return std::format("abatir o capturar al pirata {} (visto cerca de {})", contract.targetName,
-                       nameOf(world, contract.port));
+    return msg("abatir o capturar al pirata {} (visto cerca de {})", literal(contract.targetName),
+               named(world, contract.port));
 }
 
 void Sandbox::closeContract(Contract& contract, ContractState state, SimTime now) {
@@ -74,8 +75,8 @@ void Sandbox::closeContract(Contract& contract, ContractState state, SimTime now
             }
             ++m_stats.contractsCompletedByTraders;
             addJournal(now,
-                       std::format("Noticias: {} cumple un contrato de suministro ({}).",
-                                   nameOf(world, contract.holder), describe(contract)),
+                       msg("Noticias: {} cumple un contrato de suministro ({}).",
+                           named(world, contract.holder), describe(contract)),
                        JournalKind::News);
             return;
         }
@@ -86,14 +87,14 @@ void Sandbox::closeContract(Contract& contract, ContractState state, SimTime now
         }
         changeReputation(content::kReputationContractDone);
         addJournal(now,
-                   std::format("Contrato cumplido: {}. Cobras {} cr.", describe(contract), contract.reward));
+                   msg("Contrato cumplido: {}. Cobras {} cr.", describe(contract), number(contract.reward)));
         return; // the escrow (or the port's purse) is the reward
     case ContractState::Failed:
         ++m_stats.contractsFailed;
         if (player) {
             changeReputation(content::kReputationContractFailed);
-            addJournal(now, std::format("Contrato fallido: {}. Reputación {:.0f}.", describe(contract),
-                                        m_reputation));
+            addJournal(now, msg("Contrato fallido: {}. Reputación {}.", describe(contract),
+                                number(m_reputation, 0)));
         }
         break;
     case ContractState::Expired:
@@ -102,7 +103,7 @@ void Sandbox::closeContract(Contract& contract, ContractState state, SimTime now
     case ContractState::Cancelled:
         ++m_stats.contractsCancelled;
         if (player) {
-            addJournal(now, std::format("Contrato cancelado: {}.", describe(contract)));
+            addJournal(now, msg("Contrato cancelado: {}.", describe(contract)));
         }
         break;
     default:
@@ -226,9 +227,9 @@ void Sandbox::updateContracts(const TickContext& context) {
             if (scarce && !posted) { // the port pays: no escrow
                 post(contract);
                 addJournal(now,
-                           std::format("Noticias: escasez de {} en {}. Contrato de suministro: {} cr.",
-                                       m_economy.goods()[good.good].name, nameOf(world, port),
-                                       contract.reward),
+                           msg("Noticias: escasez de {} en {}. Contrato de suministro: {} cr.",
+                               term(m_economy.goods()[good.good].name), named(world, port),
+                               number(contract.reward)),
                            JournalKind::News);
                 break; // one request per port at a time
             }
@@ -266,8 +267,9 @@ void Sandbox::updateContracts(const TickContext& context) {
             }
             post(contract);
             addJournal(now,
-                       std::format("Noticias: se busca al pirata {}, visto cerca de {}. Recompensa: {} cr.",
-                                   contract.targetName, nameOf(world, contract.port), contract.reward),
+                       msg("Noticias: se busca al pirata {}, visto cerca de {}. Recompensa: {} cr.",
+                           literal(contract.targetName), named(world, contract.port),
+                           number(contract.reward)),
                        JournalKind::News);
         }
     }
@@ -278,14 +280,14 @@ void Sandbox::onContractCommand(const ContractCommand& command, const TickContex
     const auto reject = [&](const char* reason, const char* message) {
         ++m_stats.commandsRejected;
         GX_LOG_WARN("Sandbox", "contract command rejected: {}", reason);
-        addJournal(context.now, message);
+        addJournal(context.now, msg(message));
     };
     const ShipIdentity* identity =
         world.isAlive(command.ship) ? world.components<ShipIdentity>().tryGet(command.ship) : nullptr;
     const auto it = std::find_if(m_contracts.begin(), m_contracts.end(),
                                  [&](const Contract& c) { return c.id == command.contract; });
     if (identity == nullptr || identity->faction != content::kFactionPlayer || it == m_contracts.end()) {
-        reject("no such contract or ship", "Ese contrato ya no existe.");
+        reject("no such contract or ship", GX_TEXT("Ese contrato ya no existe."));
         return;
     }
     Contract& contract = *it;
@@ -298,19 +300,19 @@ void Sandbox::onContractCommand(const ContractCommand& command, const TickContex
                 return c.state == ContractState::Accepted;
             }));
         if (contract.state != ContractState::Open) {
-            reject("not open", "Ese contrato ya no está disponible.");
+            reject("not open", GX_TEXT("Ese contrato ya no está disponible."));
         } else if (dockedBody == nullptr || dockedBody->kind != BodyKind::Station) {
-            reject("not at a station", "Los contratos se aceptan en el tablón de una estación.");
+            reject("not at a station", GX_TEXT("Los contratos se aceptan en el tablón de una estación."));
         } else if (hostile()) {
-            reject("hostile", "La Autoridad no da contratos a quien considera hostil.");
+            reject("hostile", GX_TEXT("La Autoridad no da contratos a quien considera hostil."));
         } else if (accepted >= content::kMaxAcceptedContracts) {
-            reject("too many", "Ya tienes tres contratos en curso.");
+            reject("too many", GX_TEXT("Ya tienes tres contratos en curso."));
         } else {
             contract.state = ContractState::Accepted;
             contract.holderFaction = content::kFactionPlayer;
             contract.holder = command.ship;
             addJournal(context.now,
-                       std::format("Contrato aceptado: {} ({} cr).", describe(contract), contract.reward));
+                       msg("Contrato aceptado: {} ({} cr).", describe(contract), number(contract.reward)));
         }
         return;
     }
@@ -320,11 +322,11 @@ void Sandbox::onContractCommand(const ContractCommand& command, const TickContex
         MarketGood* good = market != nullptr ? market->find(contract.good) : nullptr;
         if (contract.state != ContractState::Accepted || contract.kind != ContractKind::Delivery ||
             contract.holderFaction != content::kFactionPlayer) {
-            reject("nothing to deliver", "Ese contrato no es de entrega o no es tuyo.");
+            reject("nothing to deliver", GX_TEXT("Ese contrato no es de entrega o no es tuyo."));
         } else if (docked != contract.port || good == nullptr || hold == nullptr) {
-            reject("wrong port", "Tienes que estar atracado en el puerto de destino.");
+            reject("wrong port", GX_TEXT("Tienes que estar atracado en el puerto de destino."));
         } else if (hold->amount(contract.good) == 0) {
-            reject("no cargo", "No llevas ese bien en la bodega.");
+            reject("no cargo", GX_TEXT("No llevas ese bien en la bodega."));
         } else {
             // Straight into the port's stock (no sale: the contract pays instead).
             const u32 tonnes = hold->remove(contract.good, contract.tonnes - contract.delivered);
@@ -334,15 +336,15 @@ void Sandbox::onContractCommand(const ContractCommand& command, const TickContex
             if (contract.delivered >= contract.tonnes) {
                 closeContract(contract, ContractState::Completed, context.now);
             } else {
-                addJournal(context.now, std::format("Entregas {} t: faltan {} t.", tonnes,
-                                                    contract.tonnes - contract.delivered));
+                addJournal(context.now, msg("Entregas {} t: faltan {} t.", number(tonnes),
+                                            number(contract.tonnes - contract.delivered)));
             }
         }
         return;
     }
     case ContractAction::Abandon:
         if (contract.state != ContractState::Accepted || contract.holderFaction != content::kFactionPlayer) {
-            reject("not yours", "Ese contrato no es tuyo.");
+            reject("not yours", GX_TEXT("Ese contrato no es tuyo."));
         } else {
             closeContract(contract, ContractState::Failed, context.now);
         }
@@ -350,7 +352,7 @@ void Sandbox::onContractCommand(const ContractCommand& command, const TickContex
     case ContractAction::Count:
         break;
     }
-    reject("invalid action", "Acción de contrato no válida.");
+    reject("invalid action", GX_TEXT("Acción de contrato no válida."));
 }
 
 } // namespace gx

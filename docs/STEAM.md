@@ -11,6 +11,7 @@ ejecutable empaquetado una vez (60 fotogramas y una captura) para comprobar que 
 ```text
 dist/GalaxyEngine/                        ← el depot de Steam: esto es lo que se instala
     gx_game.exe                           ← sin consola, CRT estático: no hace falta el redistribuible de VC++
+    data/lang/en.po                       ← traducciones (el español va en el código, ADR-036)
     licenses/SDL3.txt, licenses/DearImGui.txt
 dist/symbols/gx_game.pdb                  ← para leer volcados de errores; NUNCA se sube al depot
 dist/GalaxyEngine-<versión>-windows-x64.zip
@@ -88,7 +89,7 @@ Lo técnico está resuelto: se compila, se empaqueta, arranca y se sube. Lo que 
 | Nombre y marca | "GalaxyEngine" es provisional (es el nombre del motor) | nombre definitivo, comprobado en marcas registradas y en Steam; fijar la carpeta de datos antes del primer lanzamiento |
 | Menú principal y opciones | hecho (ADR-035): menú, pausa, vídeo, escala de UI, salir con confirmación | reasignar teclas; opciones de audio cuando haya audio |
 | Audio | no hay | música y efectos (y su volumen) |
-| Idiomas | solo español | inglés como mínimo para el mercado de Steam; los textos deben salir del código a tablas |
+| Idiomas | español e inglés (ADR-036); se detecta el del sistema | más idiomas: copiar `data/lang/en.po`, traducir, `python tools/i18n.py check`; revisar el inglés con un nativo |
 | Tutorial | ventana de controles (F1) | primeros pasos guiados |
 | Varias partidas | un solo guardado rápido | varias ranuras, autoguardado |
 | Mando / Steam Deck | solo teclado y ratón | se puede publicar sin ello; indicarlo en la tienda |

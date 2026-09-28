@@ -77,21 +77,21 @@ void addText(ImDrawList& drawList, ImVec2 position, ImU32 color, std::string_vie
 const char* displayName(BodyKind kind) {
     switch (kind) {
     case BodyKind::Star:
-        return "Estrella";
+        return tr("Estrella");
     case BodyKind::RockyPlanet:
-        return "Planeta rocoso";
+        return tr("Planeta rocoso");
     case BodyKind::DesertPlanet:
-        return "Planeta desértico";
+        return tr("Planeta desértico");
     case BodyKind::OceanPlanet:
-        return "Planeta oceánico";
+        return tr("Planeta oceánico");
     case BodyKind::IcePlanet:
-        return "Planeta helado";
+        return tr("Planeta helado");
     case BodyKind::GasGiant:
-        return "Gigante gaseoso";
+        return tr("Gigante gaseoso");
     case BodyKind::Moon:
-        return "Luna";
+        return tr("Luna");
     case BodyKind::Station:
-        return "Estación";
+        return tr("Estación");
     default:
         return "?";
     }
@@ -100,17 +100,17 @@ const char* displayName(BodyKind kind) {
 const char* displayName(FlightMode mode) {
     switch (mode) {
     case FlightMode::Coast:
-        return "Deriva";
+        return tr("Deriva");
     case FlightMode::Stop:
-        return "Deteniéndose";
+        return tr("Deteniéndose");
     case FlightMode::MoveTo:
-        return "Rumbo a un punto";
+        return tr("Rumbo a un punto");
     case FlightMode::Approach:
-        return "Aproximación";
+        return tr("Aproximación");
     case FlightMode::Manual:
-        return "Pilotaje manual";
+        return tr("Pilotaje manual");
     case FlightMode::Pursue:
-        return "Persecución";
+        return tr("Persecución");
     default:
         return "?";
     }
@@ -119,11 +119,11 @@ const char* displayName(FlightMode mode) {
 const char* displayName(DrivePhase phase) {
     switch (phase) {
     case DrivePhase::Sublight:
-        return "Sublumínico";
+        return tr("Sublumínico");
     case DrivePhase::Charging:
-        return "Cargando salto";
+        return tr("Cargando salto");
     case DrivePhase::Hyperspace:
-        return "Hiperespacio";
+        return tr("Hiperespacio");
     default:
         return "?";
     }
@@ -132,11 +132,11 @@ const char* displayName(DrivePhase phase) {
 const char* displayName(ContactLevel level) {
     switch (level) {
     case ContactLevel::Unknown:
-        return "Desconocido";
+        return tr("Desconocido");
     case ContactLevel::Classified:
-        return "Clasificado";
+        return tr("Clasificado");
     case ContactLevel::Identified:
-        return "Identificado";
+        return tr("Identificado");
     default:
         return "?";
     }
@@ -144,7 +144,11 @@ const char* displayName(ContactLevel level) {
 
 const char* displayName(ModuleType type) {
     const auto index = static_cast<usize>(type);
-    return index < content::kModuleNames.size() ? content::kModuleNames[index] : "?";
+    return index < content::kModuleNames.size() ? tr(content::kModuleNames[index]) : "?";
+}
+
+std::string localizedName(std::string_view name) {
+    return render(properName(std::string(name)), activeCatalog());
 }
 
 std::string contactLabel(const ContactView& contact) {
@@ -152,7 +156,7 @@ std::string contactLabel(const ContactView& contact) {
         return std::string(contact.name);
     }
     if (contact.level == ContactLevel::Classified) {
-        return std::format("{}? ({})", content::kShipClasses[contact.shipClass].name, contact.trackId);
+        return std::format("{}? ({})", tr(content::kShipClasses[contact.shipClass].name), contact.trackId);
     }
     return std::format("?{}", contact.trackId);
 }
@@ -164,7 +168,7 @@ std::string formatDistance(f64 meters) {
     if (meters < 1e9) {
         return std::format("{:.0f} km", meters / 1'000.0);
     }
-    return std::format("{:.3f} UA", meters / kAstronomicalUnit);
+    return std::format("{:.3f} {}", meters / kAstronomicalUnit, tr("UA"));
 }
 
 std::string formatSpeed(f64 metersPerSecond) {
@@ -335,7 +339,7 @@ void MapView::draw(const SystemSnapshot& snapshot, const MapSelection& selected,
                                   length(body.orbitPath->front()) / mpp > 25.0;
         if (!isMinor || orbitVisible || body.id == selected.entity || body.id == hovered.entity) {
             addText(drawList, {center.x + radius + 4.0f, center.y - 7.0f},
-                    isMinor ? kDimText : kBackgroundText, body.name);
+                    isMinor ? kDimText : kBackgroundText, localizedName(body.name));
         }
     }
 
@@ -403,7 +407,7 @@ void MapView::draw(const SystemSnapshot& snapshot, const MapSelection& selected,
             addText(drawList, {center.x + size + 4.0f, center.y + 2.0f}, color, ship.name);
         }
         if (!ship.powered && (own || options.showTruth)) {
-            addText(drawList, {center.x + size + 4.0f, center.y + 16.0f}, kTargetColor, "sin energía");
+            addText(drawList, {center.x + size + 4.0f, center.y + 16.0f}, kTargetColor, tr("sin energía"));
         }
     }
 
@@ -460,7 +464,7 @@ void MapView::drawContacts(ImDrawList& drawList, const SystemSnapshot& snapshot,
         }
         std::string label = contactLabel(contact);
         if (options.showTruth && contact.ghost) {
-            label += " [fantasma]";
+            label += std::string(" ") + tr("[fantasma]");
         }
         addText(drawList, {center.x + kSize + 4.0f, center.y - 7.0f}, color, label);
     }
@@ -529,7 +533,7 @@ void MapView::drawScaleBar(ImDrawList& drawList) const {
     drawList.AddLine({origin.x + pixels, origin.y - 4.0f}, {origin.x + pixels, origin.y + 4.0f},
                      kBackgroundText, 1.5f);
     addText(drawList, {origin.x, origin.y - 20.0f}, kBackgroundText,
-            astronomical ? std::format("{:g} UA", niceUnits) : formatDistance(nice));
+            astronomical ? std::format("{:g} {}", niceUnits, tr("UA")) : formatDistance(nice));
 }
 
 } // namespace gx

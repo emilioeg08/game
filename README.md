@@ -94,7 +94,9 @@ WASD = empuje manual · X = frenar · E = atacar el contacto seleccionado · C =
 R/T = radar/transpondedor · ventana Mercado al atracar · Espacio = pausa · 1/2/3 = ×1 (tiempo real)/×3/×10 · H/F = seguir ·
 F5/F9 = guardar/cargar · F11 = pantalla completa · Esc = deseleccionar o pausa · F3 = depuración · F1 = ayuda.
 El juego empieza en el menú principal (continuar, nueva partida con semilla, opciones); las opciones se
-guardan en `%APPDATA%\GalaxyEngine\Sandbox\settings.ini`. La primera configuración descarga SDL3 y Dear ImGui
+guardan en `%APPDATA%\GalaxyEngine\Sandbox\settings.ini`. Idiomas: español e inglés, según el del sistema o
+el que elijas en Opciones (catálogos en `data/lang`, ver ADR-036; `python tools/i18n.py check data/lang/en.po`
+comprueba que todo esté traducido). La primera configuración descarga SDL3 y Dear ImGui
 (versiones fijadas); `-DGX_BUILD_CLIENT=OFF` compila sin el cliente.
 
 Modo captura para comprobaciones automáticas:
@@ -125,6 +127,7 @@ con `gx_game.exe --seed 1 --fly-to 1 --prerun-hours 0.0745 --engage-nearest --zo
 ./build/release/bin/gx_headless.exe --sandbox --minutes 600 --pirates 0 --markets   # economía por puerto
 ./build/release/bin/gx_headless.exe --sandbox --minutes 600 --patrols 0 --dump      # sin patrullas; estado final
 ./build/release/bin/gx_headless.exe --sandbox --minutes 480 --no-finance            # M3.4: reemplazos gratis
+./build/release/bin/gx_headless.exe --sandbox --minutes 120 --journal --lang en     # el diario, en inglés
 
 ./build/release/bin/gx_headless.exe --help
 ```
@@ -151,6 +154,6 @@ cmake/ scripts/ tools/
   combate, economía, NPC, controles).
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md): capas, tiempo, pipeline, presentación, threading,
   entidades, eventos, comandos, persistencia, determinismo, LOD, referencias, contradicciones y riesgos.
-- [docs/DECISIONS.md](docs/DECISIONS.md): registro de decisiones (ADR-001 a ADR-035).
+- [docs/DECISIONS.md](docs/DECISIONS.md): registro de decisiones (ADR-001 a ADR-036).
 - [docs/BENCHMARKS.md](docs/BENCHMARKS.md): método y resultados medidos por hito.
 - [docs/STEAM.md](docs/STEAM.md): empaquetado para Windows, subida a Steam y lo que falta para la tienda.

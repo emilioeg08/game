@@ -1,0 +1,1325 @@
+msgid ""
+msgstr ""
+"Content-Type: text/plain; charset=UTF-8\n"
+"Language: en\n"
+"X-Language-Name: English\n"
+
+#: Apps/Game/GameApp.cpp:120
+msgid "No se puede crear la carpeta de datos del usuario."
+msgstr "The user data folder cannot be created."
+
+#: Apps/Game/GameApp.cpp:353
+msgid "NAVE DESTRUIDA  ·  una nave nueva te espera en {:.0f} s"
+msgstr "SHIP DESTROYED  ·  a new ship awaits you in {:.0f} s"
+
+#: Apps/Game/GameApp.cpp:406
+msgid "Nueva partida: sistema {} (semilla {})"
+msgstr "New game: system {} (seed {})"
+
+#: Apps/Game/GameApp.cpp:520
+msgid "Partida guardada en {} ({:.1f} KiB)"
+msgstr "Game saved to {} ({:.1f} KiB)"
+
+#: Apps/Game/GameApp.cpp:523
+msgid "Error al guardar: {}"
+msgstr "Save failed: {}"
+
+#: Apps/Game/GameApp.cpp:531
+msgid "No se pudo cargar: {}"
+msgstr "Could not load: {}"
+
+#: Apps/Game/GameApp.cpp:537
+msgid "Partida incompatible: {}"
+msgstr "Incompatible save: {}"
+
+#: Apps/Game/GameApp.cpp:550
+msgid "Partida cargada: {}"
+msgstr "Game loaded: {}"
+
+#: Apps/Game/GameApp.cpp:737
+msgid "Sistema %s   |   %s"
+msgstr "System %s   |   %s"
+
+#: Apps/Game/GameApp.cpp:738
+msgid "  Pausa  "
+msgstr "  Pause  "
+
+#: Apps/Game/GameApp.cpp:738
+msgid "Reanudar"
+msgstr "Resume"
+
+#: Apps/Game/GameApp.cpp:758
+msgid "real —"
+msgstr "real —"
+
+#: Apps/Game/GameApp.cpp:760
+msgid "real x%.0f (limitado por CPU)"
+msgstr "real x%.0f (CPU bound)"
+
+#: Apps/Game/GameApp.cpp:762
+msgid "real x%.0f"
+msgstr "real x%.0f"
+
+#: Apps/Game/GameApp.cpp:771
+msgid "Nave"
+msgstr "Ship"
+
+#: Apps/Game/GameApp.cpp:774 Game/Sandbox/Sandbox.cpp:1188
+msgid "Tu nave ha sido destruida."
+msgstr "Your ship has been destroyed."
+
+#: Apps/Game/GameApp.cpp:775
+msgid "Una nave nueva te espera en %s dentro de %.0f s."
+msgstr "A new ship awaits you at %s in %.0f s."
+
+#: Apps/Game/GameApp.cpp:790
+msgid "Créditos: %lld cr   ·   Bodega: %u / %u t"
+msgstr "Credits: %lld cr   ·   Hold: %u / %u t"
+
+#: Apps/Game/GameApp.cpp:793
+msgid "Carga: %s"
+msgstr "Cargo: %s"
+
+#: Apps/Game/GameApp.cpp:796
+msgid "hostil: la Autoridad te busca"
+msgstr "hostile: the Authority wants you"
+
+#: Apps/Game/GameApp.cpp:797
+msgid "sospechosa"
+msgstr "suspicious"
+
+#: Apps/Game/GameApp.cpp:798
+msgid "respetada"
+msgstr "respected"
+
+#: Apps/Game/GameApp.cpp:799
+msgid "neutral"
+msgstr "neutral"
+
+#: Apps/Game/GameApp.cpp:803
+msgid "Reputación: %.0f (%s)"
+msgstr "Reputation: %.0f (%s)"
+
+#: Apps/Game/GameApp.cpp:806
+msgid "Velocidad:    %s"
+msgstr "Speed:        %s"
+
+#: Apps/Game/GameApp.cpp:807
+msgid "Aceleración:  %.0f m/s² (%.0f g)"
+msgstr "Acceleration: %.0f m/s² (%.0f g)"
+
+#: Apps/Game/GameApp.cpp:808
+msgid "Modo:         %s"
+msgstr "Mode:         %s"
+
+#: Apps/Game/GameApp.cpp:810
+msgid "Motor:        cargando salto (%.1f s)"
+msgstr "Drive:        charging jump (%.1f s)"
+
+#: Apps/Game/GameApp.cpp:813
+msgid "Motor:        %s"
+msgstr "Drive:        %s"
+
+#: Apps/Game/GameApp.cpp:817
+msgid "punto del espacio"
+msgstr "point in space"
+
+#: Apps/Game/GameApp.cpp:818
+msgid "Destino:      %s"
+msgstr "Destination:  %s"
+
+#: Apps/Game/GameApp.cpp:819 Apps/Game/GameApp.cpp:827
+msgid "Distancia:    %s"
+msgstr "Distance:     %s"
+
+#: Apps/Game/GameApp.cpp:821
+msgid "Estado:       %s"
+msgstr "Status:       %s"
+
+#: Apps/Game/GameApp.cpp:821
+msgid "en posición"
+msgstr "in position"
+
+#: Apps/Game/GameApp.cpp:821
+msgid "en ruta"
+msgstr "en route"
+
+#: Apps/Game/GameApp.cpp:824
+msgid "Persigue:     %s"
+msgstr "Pursuing:     %s"
+
+#: Apps/Game/GameApp.cpp:825 Apps/Game/GameApp.cpp:875
+msgid "contacto perdido"
+msgstr "contact lost"
+
+#: Apps/Game/GameApp.cpp:831
+msgid "Detener (X)"
+msgstr "Stop (X)"
+
+#: Apps/Game/GameApp.cpp:835 Apps/Game/MapView.cpp:103
+msgid "Deriva"
+msgstr "Drift"
+
+#: Apps/Game/GameApp.cpp:839
+msgid "Seguir (H)"
+msgstr "Follow (H)"
+
+#: Apps/Game/GameApp.cpp:845
+msgid "Destinos (clic para fijar rumbo)"
+msgstr "Destinations (click to set course)"
+
+#: Apps/Game/GameApp.cpp:866
+msgid "Modo táctico"
+msgstr "Tactical mode"
+
+#: Apps/Game/GameApp.cpp:871
+msgid "SIN ENERGÍA: a la deriva hasta que se repare el reactor"
+msgstr "NO POWER: drifting until the reactor is repaired"
+
+#: Apps/Game/GameApp.cpp:874
+msgid "Fuego sobre: %s"
+msgstr "Firing on: %s"
+
+#: Apps/Game/GameApp.cpp:1207 Apps/Game/GameApp.cpp:876
+msgid "Alto el fuego (C)"
+msgstr "Cease fire (C)"
+
+#: Apps/Game/GameApp.cpp:880
+msgid "Armas en espera"
+msgstr "Weapons on standby"
+
+#: Apps/Game/GameApp.cpp:895
+msgid "%s (fuera de servicio)"
+msgstr "%s (out of service)"
+
+#: Apps/Game/GameApp.cpp:906
+msgid "%s  ·  fuera de alcance (%s)"
+msgstr "%s  ·  out of range (%s)"
+
+#: Apps/Game/GameApp.cpp:909
+msgid "%s  ·  sin fijación"
+msgstr "%s  ·  no lock"
+
+#: Apps/Game/GameApp.cpp:911
+msgid "%s  ·  recargando %.1f s"
+msgstr "%s  ·  reloading %.1f s"
+
+#: Apps/Game/GameApp.cpp:913
+msgid "%s  ·  fijado"
+msgstr "%s  ·  locked"
+
+#: Apps/Game/GameApp.cpp:926
+msgid "Mercado · {}"
+msgstr "Market · {}"
+
+#: Apps/Game/GameApp.cpp:928
+msgid "Créditos: %lld cr"
+msgstr "Credits: %lld cr"
+
+#: Apps/Game/GameApp.cpp:934
+msgid "  ·  bodega %u / %u t  ·  impuesto %.0f %%"
+msgstr "  ·  hold %u / %u t  ·  tax %.0f %%"
+
+#: Apps/Game/GameApp.cpp:938 Game/Sandbox/Sandbox.cpp:1383
+msgid "El puerto se niega a comerciar contigo: tu reputación es hostil."
+msgstr "The port refuses to trade with you: your reputation is hostile."
+
+#: Apps/Game/GameApp.cpp:1089 Apps/Game/GameApp.cpp:1148 Apps/Game/GameApp.cpp:941
+msgid "Bien"
+msgstr "Good"
+
+#: Apps/Game/GameApp.cpp:1092 Apps/Game/GameApp.cpp:1149 Apps/Game/GameApp.cpp:942
+msgid "Existencias"
+msgstr "Stock"
+
+#: Apps/Game/GameApp.cpp:943
+msgid "Prod. / cons."
+msgstr "Prod. / cons."
+
+#: Apps/Game/GameApp.cpp:1090 Apps/Game/GameApp.cpp:944
+msgid "Compra"
+msgstr "Buy"
+
+#: Apps/Game/GameApp.cpp:1091 Apps/Game/GameApp.cpp:945
+msgid "Venta"
+msgstr "Sell"
+
+#: Apps/Game/GameApp.cpp:946 Game/Sandbox/Content.h:92
+msgid "Bodega"
+msgstr "Hold"
+
+#: Apps/Game/GameApp.cpp:993
+msgid "Todo"
+msgstr "All"
+
+#: Apps/Game/GameApp.cpp:1007
+msgid "Contratos (K)"
+msgstr "Contracts (K)"
+
+#: Apps/Game/GameApp.cpp:1017
+msgid "Tus contratos"
+msgstr "Your contracts"
+
+#: Apps/Game/GameApp.cpp:1026 Apps/Game/GameApp.cpp:1068
+msgid "%lld cr  ·  quedan %s"
+msgstr "%lld cr  ·  %s left"
+
+#: Apps/Game/GameApp.cpp:1034
+msgid "·  entregado %u / %u t  ·  en bodega %u t"
+msgstr "·  delivered %u / %u t  ·  in hold %u t"
+
+#: Apps/Game/GameApp.cpp:1036
+msgid "Entregar"
+msgstr "Deliver"
+
+#: Apps/Game/GameApp.cpp:1041
+msgid "Abandonar"
+msgstr "Abandon"
+
+#: Apps/Game/GameApp.cpp:1048
+msgid "Ninguno."
+msgstr "None."
+
+#: Apps/Game/GameApp.cpp:1055
+msgid "Tablón de contratos (%zu publicados)"
+msgstr "Contract board (%zu posted)"
+
+#: Apps/Game/GameApp.cpp:1058 Game/Sandbox/SandboxContracts.cpp:307
+msgid "La Autoridad no da contratos a quien considera hostil."
+msgstr "The Authority gives no contracts to those it considers hostile."
+
+#: Apps/Game/GameApp.cpp:1060
+msgid "Atraca en una estación para verlos y aceptarlos."
+msgstr "Dock at a station to see and accept them."
+
+#: Apps/Game/GameApp.cpp:1071
+msgid "Aceptar"
+msgstr "Accept"
+
+#: Apps/Game/GameApp.cpp:1083
+msgid "Sin datos de mercado: nadie te ha contado sus precios."
+msgstr "No market data: nobody has told you their prices."
+
+#: Apps/Game/GameApp.cpp:1086
+msgid "Precios que conoces (de hace %s)"
+msgstr "Prices you know (from %s ago)"
+
+#: Apps/Game/GameApp.cpp:1103
+msgid "escasas"
+msgstr "scarce"
+
+#: Apps/Game/GameApp.cpp:1104
+msgid "bajas"
+msgstr "low"
+
+#: Apps/Game/GameApp.cpp:1105
+msgid "normales"
+msgstr "normal"
+
+#: Apps/Game/GameApp.cpp:1106
+msgid "abundantes"
+msgstr "plentiful"
+
+#: Apps/Game/GameApp.cpp:1115
+msgid "Comerciantes: %llu cargas, %llu t entregadas, %llu viajes de reposición, %llu de exploración"
+msgstr "Traders: %llu loads, %llu t delivered, %llu repositioning trips, %llu exploring"
+
+#: Apps/Game/GameApp.cpp:1123
+msgid "Banco: capital %lld cr (caja %lld, préstamos %lld, depósitos %lld) · impagos %lld"
+msgstr "Bank: equity %lld cr (cash %lld, loans %lld, deposits %lld) · written off %lld"
+
+#: Apps/Game/GameApp.cpp:1128
+msgid "Mutua de Fletadores: fondo %lld cr · prima %.0f cr/h por carguero · siniestros %lld cr (%llu cascos, reparaciones %lld)"
+msgstr "Freighters' Mutual: fund %lld cr · premium %.0f cr/h per hauler · claims %lld cr (%llu hulls, repairs %lld)"
+
+#: Apps/Game/GameApp.cpp:1134
+msgid "Flota: %zu cargueros · uno más ganaría %.0f cr/h · %llu comprados · %llu embargados · %zu armadores esperando"
+msgstr "Fleet: %zu haulers · one more would earn %.0f cr/h · %llu bought · %llu repossessed · %zu owners waiting"
+
+#: Apps/Game/GameApp.cpp:1141
+msgid "{} (peligro {:.2f})"
+msgstr "{} (danger {:.2f})"
+
+#: Apps/Game/GameApp.cpp:1150
+msgid "Precio"
+msgstr "Price"
+
+#: Apps/Game/GameApp.cpp:1151
+msgid "Prod./cons. t/h"
+msgstr "Prod./cons. t/h"
+
+#: Apps/Game/GameApp.cpp:1152
+msgid "Escasez"
+msgstr "Shortage"
+
+#: Apps/Game/GameApp.cpp:1180
+msgid "Contacto %u: %s?"
+msgstr "Contact %u: %s?"
+
+#: Apps/Game/GameApp.cpp:1183
+msgid "Contacto desconocido %u"
+msgstr "Unknown contact %u"
+
+#: Apps/Game/GameApp.cpp:1185
+msgid "Sensores: %s"
+msgstr "Sensors: %s"
+
+#: Apps/Game/GameApp.cpp:1187
+msgid "Facción: %s  ·  %s"
+msgstr "Faction: %s  ·  %s"
+
+#: Apps/Game/GameApp.cpp:1192
+msgid "Distancia estimada: %s"
+msgstr "Estimated distance: %s"
+
+#: Apps/Game/GameApp.cpp:1195
+msgid "Incertidumbre: ±%s"
+msgstr "Uncertainty: ±%s"
+
+#: Apps/Game/GameApp.cpp:1196
+msgid "Velocidad estimada: %s"
+msgstr "Estimated speed: %s"
+
+#: Apps/Game/GameApp.cpp:1197
+msgid "Última detección: hace %.0f s"
+msgstr "Last detected: %.0f s ago"
+
+#: Apps/Game/GameApp.cpp:1198
+msgid "Ir a su posición estimada"
+msgstr "Go to its estimated position"
+
+#: Apps/Game/GameApp.cpp:1201
+msgid "Interceptar"
+msgstr "Intercept"
+
+#: Apps/Game/GameApp.cpp:1210
+msgid "Atacar (E)"
+msgstr "Attack (E)"
+
+#: Apps/Game/GameApp.cpp:1214
+msgid "Abordar (B)"
+msgstr "Board (B)"
+
+#: Apps/Game/GameApp.cpp:1217
+msgid "Abordar: a menos de 5 km, velocidad igualada y la otra nave sin energía."
+msgstr "Boarding: within 5 km, matched speed and the other ship without power."
+
+#: Apps/Game/GameApp.cpp:1219
+msgid "[depuración] contacto fantasma: no existe"
+msgstr "[debug] ghost contact: it does not exist"
+
+#: Apps/Game/GameApp.cpp:1233 Apps/Game/GameApp.cpp:1248
+msgid "Selección"
+msgstr "Selection"
+
+#: Apps/Game/GameApp.cpp:1252
+msgid "%s  ·  radio %s"
+msgstr "%s  ·  radius %s"
+
+#: Apps/Game/GameApp.cpp:1262
+msgid "Distancia a tu nave: %s"
+msgstr "Distance to your ship: %s"
+
+#: Apps/Game/GameApp.cpp:1265
+msgid "Fijar rumbo"
+msgstr "Set course"
+
+#: Apps/Game/GameApp.cpp:1269
+msgid "Seguir (F)"
+msgstr "Follow (F)"
+
+#: Apps/Game/GameApp.cpp:1273
+msgid "Mercado"
+msgstr "Market"
+
+#: Apps/Game/GameApp.cpp:1276
+msgid "Atracado aquí: comercia en la ventana Mercado."
+msgstr "Docked here: trade in the Market window."
+
+#: Apps/Game/GameApp.cpp:1281
+msgid "Inspector de entidad"
+msgstr "Entity inspector"
+
+#: Apps/Game/GameApp.cpp:1294 Game/Sandbox/Content.h:92
+msgid "Sensores"
+msgstr "Sensors"
+
+#: Apps/Game/GameApp.cpp:1298
+msgid "Apagar radar (R)"
+msgstr "Radar off (R)"
+
+#: Apps/Game/GameApp.cpp:1298
+msgid "Encender radar (R)"
+msgstr "Radar on (R)"
+
+#: Apps/Game/GameApp.cpp:1302
+msgid "Apagar transpondedor (T)"
+msgstr "Transponder off (T)"
+
+#: Apps/Game/GameApp.cpp:1303
+msgid "Encender transpondedor (T)"
+msgstr "Transponder on (T)"
+
+#: Apps/Game/GameApp.cpp:1308
+msgid "Tu firma: %.2g"
+msgstr "Your signature: %.2g"
+
+#: Apps/Game/GameApp.cpp:1311
+msgid "Un carguero te detecta a %s%s"
+msgstr "A hauler detects you at %s%s"
+
+#: Apps/Game/GameApp.cpp:1313
+msgid " (y te identifica a 1 UA por el transpondedor)"
+msgstr " (and identifies you at 1 AU by your transponder)"
+
+#: Apps/Game/GameApp.cpp:1319
+msgid "Sin nave, no hay sensores."
+msgstr "No ship, no sensors."
+
+#: Apps/Game/GameApp.cpp:1330
+msgid "%zu contactos (clic para seleccionar)"
+msgstr "%zu contacts (click to select)"
+
+#: Apps/Game/GameApp.cpp:1332
+msgid "Contacto"
+msgstr "Contact"
+
+#: Apps/Game/GameApp.cpp:1333
+msgid "Nivel"
+msgstr "Level"
+
+#: Apps/Game/GameApp.cpp:1334
+msgid "Distancia"
+msgstr "Distance"
+
+#: Apps/Game/GameApp.cpp:1335
+msgid "Hace"
+msgstr "Age"
+
+#: Apps/Game/GameApp.cpp:1362
+msgid "Diario"
+msgstr "Journal"
+
+#: Apps/Game/GameApp.cpp:1363
+msgid "Tráfico de otras naves"
+msgstr "Other ships' traffic"
+
+#: Apps/Game/GameApp.cpp:1391
+msgid "Depuración (F3)"
+msgstr "Debug (F3)"
+
+#: Apps/Game/GameApp.cpp:1395
+msgid "%.0f FPS  (%.2f ms/frame)"
+msgstr "%.0f FPS  (%.2f ms/frame)"
+
+#: Apps/Game/GameApp.cpp:1396
+msgid "Simulación: %llu pasos en el último frame, %.2f ms"
+msgstr "Simulation: %llu steps last frame, %.2f ms"
+
+#: Apps/Game/GameApp.cpp:1398
+msgid "Pasos totales: %llu  ·  eventos: %llu  ·  comandos: %llu"
+msgstr "Total steps: %llu  ·  events: %llu  ·  commands: %llu"
+
+#: Apps/Game/GameApp.cpp:1402
+msgid "Vuelo y combate (LOD): paso de %s"
+msgstr "Flight and combat (LOD): %s step"
+
+#: Apps/Game/GameApp.cpp:1405
+msgid "Autoridad: tesorería %lld cr · impuestos %lld · reparaciones %lld · recompensas %lld"
+msgstr "Authority: treasury %lld cr · taxes %lld · repairs %lld · bounties %lld"
+
+#: Apps/Game/GameApp.cpp:1408
+msgid "Salarios pagados %lld cr · quiebras %llu · abordajes %llu"
+msgstr "Wages paid %lld cr · bankruptcies %llu · boardings %llu"
+
+#: Apps/Game/GameApp.cpp:1411
+msgid "Patrullas: %zu en servicio · %llu puestas · %llu perdidas · %llu piratas abatidos · mantenimiento %lld cr"
+msgstr "Patrols: %zu in service · %llu commissioned · %llu lost · %llu pirates killed · upkeep %lld cr"
+
+#: Apps/Game/GameApp.cpp:1418
+msgid "Combate: %llu disparos, %llu impactos, %llu naves destruidas"
+msgstr "Combat: %llu shots, %llu hits, %llu ships destroyed"
+
+#: Apps/Game/GameApp.cpp:1423
+msgid "Piratas: %llu cacerías, %llu abatidos, %llu huidos  ·  cargueros perdidos: %llu"
+msgstr "Pirates: %llu hunts, %llu killed, %llu fled  ·  haulers lost: %llu"
+
+#: Apps/Game/GameApp.cpp:1426
+msgid "Entidades: %u  ·  semilla %llu  ·  rechazados: %llu"
+msgstr "Entities: %u  ·  seed %llu  ·  rejected: %llu"
+
+#: Apps/Game/GameApp.cpp:1429
+msgid "Mostrar la verdad (omnisciencia de depuración)"
+msgstr "Show the truth (debug omniscience)"
+
+#: Apps/Game/GameApp.cpp:1430 Apps/Game/Menus.cpp:184
+msgid "Guardar (F5)"
+msgstr "Save (F5)"
+
+#: Apps/Game/GameApp.cpp:1434 Apps/Game/Menus.cpp:188
+msgid "Cargar (F9)"
+msgstr "Load (F9)"
+
+#: Apps/Game/GameApp.cpp:1438 Apps/Game/Menus.cpp:135
+msgid "Nueva partida"
+msgstr "New game"
+
+#: Apps/Game/GameApp.cpp:1441
+msgid "Economía (verdad)"
+msgstr "Economy (truth)"
+
+#: Apps/Game/GameApp.cpp:1444
+msgid "Perfilador"
+msgstr "Profiler"
+
+#: Apps/Game/GameApp.cpp:1445
+msgid "Reiniciar estadísticas"
+msgstr "Reset statistics"
+
+#: Apps/Game/GameApp.cpp:1450
+msgid "Zona"
+msgstr "Zone"
+
+#: Apps/Game/GameApp.cpp:1451
+msgid "Llamadas"
+msgstr "Calls"
+
+#: Apps/Game/GameApp.cpp:1452
+msgid "Media µs"
+msgstr "Mean µs"
+
+#: Apps/Game/GameApp.cpp:1453
+msgid "Máx µs"
+msgstr "Max µs"
+
+#: Apps/Game/GameApp.cpp:1476
+msgid "Controles (F1)"
+msgstr "Controls (F1)"
+
+#: Apps/Game/GameApp.cpp:1478
+msgid "Rueda: zoom (de metros a unidades astronómicas)   ·   Arrastrar: mover la vista"
+msgstr "Wheel: zoom (from metres to astronomical units)   ·   Drag: move the view"
+
+#: Apps/Game/GameApp.cpp:1479
+msgid "Clic: seleccionar   ·   Clic derecho: ir a ese objeto o a ese punto"
+msgstr "Click: select   ·   Right click: go to that object or point"
+
+#: Apps/Game/GameApp.cpp:1481
+msgid "W A S D: empuje manual (newtoniano: la nave sigue derivando)   ·   X: frenar"
+msgstr "W A S D: manual thrust (Newtonian: the ship keeps drifting)   ·   X: brake"
+
+#: Apps/Game/GameApp.cpp:1482
+msgid "Espacio: pausa   ·   1 / 2 / 3: velocidad x1 (tiempo real) / x3 / x10"
+msgstr "Space: pause   ·   1 / 2 / 3: speed x1 (real time) / x3 / x10"
+
+#: Apps/Game/GameApp.cpp:1484
+msgid "Viajes largos: salto al hiperespacio fuera de los pozos gravitatorios (círculos)"
+msgstr "Long trips: jump to hyperspace outside the gravity wells (circles)"
+
+#: Apps/Game/GameApp.cpp:1486
+msgid "R: radar (ves más, pero te ven de lejos)   ·   T: transpondedor (difunde tu identidad)"
+msgstr "R: radar (you see more, but you are seen from afar)   ·   T: transponder (broadcasts your identity)"
+
+#: Apps/Game/GameApp.cpp:1488
+msgid "E: atacar el contacto seleccionado (lo persigue y dispara)   ·   C: alto el fuego   ·   B: abordar"
+msgstr "E: attack the selected contact (pursue and fire)   ·   C: cease fire   ·   B: board"
+
+#: Apps/Game/GameApp.cpp:1492
+msgid "Recompensa por piratas; si los comerciantes te identifican atacándolos, pierdes reputación"
+msgstr "Bounties for pirates; if traders identify you attacking them, you lose reputation"
+
+#: Apps/Game/GameApp.cpp:1494
+msgid "K: contratos (se aceptan en las estaciones; nacen de escaseces y piratas reales)"
+msgstr "K: contracts (accepted at stations; born from real shortages and pirates)"
+
+#: Apps/Game/GameApp.cpp:1496
+msgid "Los piratas acechan junto a los pozos; cerca de las estaciones estás a salvo"
+msgstr "Pirates lurk by the wells; near the stations you are safe"
+
+#: Apps/Game/GameApp.cpp:1498
+msgid "Atracado en un puerto: compra y vende en la ventana Mercado. Las estaciones te dan el boletín de precios de los comerciantes"
+msgstr "Docked at a port: buy and sell in the Market window. Stations give you the traders' price bulletin"
+
+#: Apps/Game/GameApp.cpp:1500
+msgid "H: seguir tu nave   ·   F: seguir la selección   ·   Esc: deseleccionar"
+msgstr "H: follow your ship   ·   F: follow the selection   ·   Esc: deselect"
+
+#: Apps/Game/GameApp.cpp:1501
+msgid "F5: guardar   ·   F9: cargar   ·   F3: depuración   ·   F1: esta ayuda"
+msgstr "F5: save   ·   F9: load   ·   F3: debug   ·   F1: this help"
+
+#: Apps/Game/GameApp.cpp:1502
+msgid "F11 o Alt+Intro: pantalla completa"
+msgstr "F11 or Alt+Enter: fullscreen"
+
+#: Apps/Game/InspectorView.cpp:19
+msgid "(la entidad ya no existe)"
+msgstr "(the entity no longer exists)"
+
+#: Apps/Game/InspectorView.cpp:22
+msgid "Entidad #%u (generación %u)"
+msgstr "Entity #%u (generation %u)"
+
+#: Apps/Game/MapView.cpp:80
+msgid "Estrella"
+msgstr "Star"
+
+#: Apps/Game/MapView.cpp:82
+msgid "Planeta rocoso"
+msgstr "Rocky planet"
+
+#: Apps/Game/MapView.cpp:84
+msgid "Planeta desértico"
+msgstr "Desert planet"
+
+#: Apps/Game/MapView.cpp:86
+msgid "Planeta oceánico"
+msgstr "Ocean planet"
+
+#: Apps/Game/MapView.cpp:88
+msgid "Planeta helado"
+msgstr "Ice planet"
+
+#: Apps/Game/MapView.cpp:90
+msgid "Gigante gaseoso"
+msgstr "Gas giant"
+
+#: Apps/Game/MapView.cpp:92
+msgid "Luna"
+msgstr "Moon"
+
+#: Apps/Game/MapView.cpp:94 Space/Generation/StarSystemGenerator.cpp:29
+msgid "Estación"
+msgstr "Station"
+
+#: Apps/Game/MapView.cpp:105
+msgid "Deteniéndose"
+msgstr "Stopping"
+
+#: Apps/Game/MapView.cpp:107
+msgid "Rumbo a un punto"
+msgstr "Heading to a point"
+
+#: Apps/Game/MapView.cpp:109
+msgid "Aproximación"
+msgstr "Approach"
+
+#: Apps/Game/MapView.cpp:111
+msgid "Pilotaje manual"
+msgstr "Manual piloting"
+
+#: Apps/Game/MapView.cpp:113
+msgid "Persecución"
+msgstr "Pursuit"
+
+#: Apps/Game/MapView.cpp:122
+msgid "Sublumínico"
+msgstr "Sublight"
+
+#: Apps/Game/MapView.cpp:124
+msgid "Cargando salto"
+msgstr "Charging jump"
+
+#: Apps/Game/MapView.cpp:126
+msgid "Hiperespacio"
+msgstr "Hyperspace"
+
+#: Apps/Game/MapView.cpp:135
+msgid "Desconocido"
+msgstr "Unknown"
+
+#: Apps/Game/MapView.cpp:137
+msgid "Clasificado"
+msgstr "Classified"
+
+#: Apps/Game/MapView.cpp:139
+msgid "Identificado"
+msgstr "Identified"
+
+#: Apps/Game/MapView.cpp:171 Apps/Game/MapView.cpp:536
+msgid "UA"
+msgstr "AU"
+
+#: Apps/Game/MapView.cpp:410
+msgid "sin energía"
+msgstr "no power"
+
+#: Apps/Game/MapView.cpp:467
+msgid "[fantasma]"
+msgstr "[ghost]"
+
+#: Apps/Game/Menus.cpp:125
+msgid "Sandbox · versión {}"
+msgstr "Sandbox · version {}"
+
+#: Apps/Game/Menus.cpp:129
+msgid "Continuar"
+msgstr "Continue"
+
+#: Apps/Game/Menus.cpp:140
+msgid "Cada semilla genera un sistema estelar distinto."
+msgstr "Each seed generates a different star system."
+
+#: Apps/Game/Menus.cpp:142
+msgid "Semilla"
+msgstr "Seed"
+
+#: Apps/Game/Menus.cpp:144
+msgid "Empezar"
+msgstr "Start"
+
+#: Apps/Game/Menus.cpp:149
+msgid "Sistema al azar"
+msgstr "Random system"
+
+#: Apps/Game/Menus.cpp:156 Apps/Game/Menus.cpp:191 Apps/Game/Menus.cpp:236
+msgid "Opciones"
+msgstr "Options"
+
+#: Apps/Game/Menus.cpp:159 Apps/Game/Menus.cpp:214
+msgid "Salir"
+msgstr "Quit"
+
+#: Apps/Game/Menus.cpp:178
+msgid "Pausa"
+msgstr "Paused"
+
+#: Apps/Game/Menus.cpp:181
+msgid "Continuar (Esc)"
+msgstr "Resume (Esc)"
+
+#: Apps/Game/Menus.cpp:194
+msgid "Menú principal"
+msgstr "Main menu"
+
+#: Apps/Game/Menus.cpp:197
+msgid "Salir al escritorio"
+msgstr "Quit to desktop"
+
+#: Apps/Game/Menus.cpp:209
+msgid "¿Salir al escritorio?"
+msgstr "Quit to the desktop?"
+
+#: Apps/Game/Menus.cpp:210
+msgid "¿Volver al menú principal?"
+msgstr "Return to the main menu?"
+
+#: Apps/Game/Menus.cpp:211
+msgid "Se perderá lo que no hayas guardado (F5)."
+msgstr "Anything you have not saved (F5) will be lost."
+
+#: Apps/Game/Menus.cpp:214
+msgid "Volver al menú"
+msgstr "Return to menu"
+
+#: Apps/Game/Menus.cpp:224
+msgid "Cancelar"
+msgstr "Cancel"
+
+#: Apps/Game/Menus.cpp:241
+msgid "Pantalla"
+msgstr "Display"
+
+#: Apps/Game/Menus.cpp:243
+msgid "Ventana"
+msgstr "Windowed"
+
+#: Apps/Game/Menus.cpp:245
+msgid "Pantalla completa (F11)"
+msgstr "Fullscreen (F11)"
+
+#: Apps/Game/Menus.cpp:247
+msgid "Sincronización vertical"
+msgstr "Vertical sync"
+
+#: Apps/Game/Menus.cpp:249
+msgid "Interfaz"
+msgstr "Interface"
+
+#: Apps/Game/Menus.cpp:256
+msgid "Escala"
+msgstr "Scale"
+
+#: Apps/Game/Menus.cpp:263
+msgid "Mostrar los controles (F1) al empezar"
+msgstr "Show the controls (F1) when starting"
+
+#: Apps/Game/Menus.cpp:265
+msgid "Idioma"
+msgstr "Language"
+
+#: Apps/Game/Menus.cpp:269
+msgid "Automático (idioma del sistema)"
+msgstr "Automatic (system language)"
+
+#: Apps/Game/Menus.cpp:295
+msgid "Datos"
+msgstr "Data"
+
+#: Apps/Game/Menus.cpp:297
+msgid "Partidas, registro y preferencias:"
+msgstr "Saves, log and preferences:"
+
+#: Apps/Game/Menus.cpp:299
+msgid "Abrir la carpeta"
+msgstr "Open the folder"
+
+#: Apps/Game/Menus.cpp:302
+msgid "No se pudo abrir la carpeta: {}"
+msgstr "Could not open the folder: {}"
+
+#: Apps/Game/Menus.cpp:307
+msgid "Volver (Esc)"
+msgstr "Back (Esc)"
+
+#: Game/Sandbox/Content.h:30
+msgid "Autoridad"
+msgstr "Authority"
+
+#: Game/Sandbox/Content.h:30
+msgid "Jugador"
+msgstr "Player"
+
+#: Game/Sandbox/Content.h:30
+msgid "Piratas"
+msgstr "Pirates"
+
+#: Game/Sandbox/Content.h:30
+msgid "Transportistas independientes"
+msgstr "Independent haulers"
+
+#: Game/Sandbox/Content.h:51
+msgid "Correo"
+msgstr "Courier"
+
+#: Game/Sandbox/Content.h:52
+msgid "Carguero"
+msgstr "Hauler"
+
+#: Game/Sandbox/Content.h:53
+msgid "Corsario"
+msgstr "Raider"
+
+#: Game/Sandbox/Content.h:54
+msgid "Patrullero"
+msgstr "Patrol ship"
+
+#: Game/Sandbox/Content.h:84
+msgid "Láser"
+msgstr "Laser"
+
+#: Game/Sandbox/Content.h:85
+msgid "Cañón de riel"
+msgstr "Railgun"
+
+#: Game/Sandbox/Content.h:91
+msgid "Estructura"
+msgstr "Structure"
+
+#: Game/Sandbox/Content.h:91
+msgid "Hipermotor"
+msgstr "Hyperdrive"
+
+#: Game/Sandbox/Content.h:91
+msgid "Motor"
+msgstr "Drive"
+
+#: Game/Sandbox/Content.h:91
+msgid "Reactor"
+msgstr "Reactor"
+
+#: Game/Sandbox/Content.h:92
+msgid "Arma"
+msgstr "Weapon"
+
+#: Game/Sandbox/Content.h:92
+msgid "Habitáculo"
+msgstr "Quarters"
+
+#: Game/Sandbox/Content.h:180
+msgid "Agua"
+msgstr "Water"
+
+#: Game/Sandbox/Content.h:180
+msgid "Alimentos"
+msgstr "Food"
+
+#: Game/Sandbox/Content.h:180
+msgid "Mineral"
+msgstr "Ore"
+
+#: Game/Sandbox/Content.h:181
+msgid "Combustible"
+msgstr "Fuel"
+
+#: Game/Sandbox/Content.h:181
+msgid "Maquinaria"
+msgstr "Machinery"
+
+#: Game/Sandbox/Content.h:181
+msgid "Metales"
+msgstr "Metals"
+
+#: Game/Sandbox/Sandbox.cpp:269
+msgid "Comienza la partida en el sistema {}."
+msgstr "The game begins in the {} system."
+
+#: Game/Sandbox/Sandbox.cpp:627
+msgid "{} acepta el contrato de suministro: {}."
+msgstr "{} accepts the supply contract: {}."
+
+#: Game/Sandbox/Sandbox.cpp:1008
+msgid "Noticias: {} quiebra y abandona el sistema."
+msgstr "News: {} goes bankrupt and leaves the system."
+
+#: Game/Sandbox/Sandbox.cpp:1034
+msgid "Una nave nueva te espera en {}."
+msgstr "A new ship awaits you at {}."
+
+#: Game/Sandbox/Sandbox.cpp:1063
+msgid "{} atraca en {}."
+msgstr "{} docks at {}."
+
+#: Game/Sandbox/Sandbox.cpp:1068
+msgid "{} ha llegado a {}."
+msgstr "{} has arrived at {}."
+
+#: Game/Sandbox/Sandbox.cpp:1069
+msgid "{} ha llegado a su destino."
+msgstr "{} has reached its destination."
+
+#: Game/Sandbox/Sandbox.cpp:1076
+msgid "La estación no te da su boletín de precios: tu reputación es hostil."
+msgstr "The station withholds its price bulletin: your reputation is hostile."
+
+#: Game/Sandbox/Sandbox.cpp:1079
+msgid "Boletín de precios de la estación: {} puertos actualizados."
+msgstr "Station price bulletin: {} ports updated."
+
+#: Game/Sandbox/Sandbox.cpp:1093
+msgid "Salto al hiperespacio."
+msgstr "Jump to hyperspace."
+
+#: Game/Sandbox/Sandbox.cpp:1096
+msgid "Salida del hiperespacio cerca de {}."
+msgstr "Out of hyperspace near {}."
+
+#: Game/Sandbox/Sandbox.cpp:1098
+msgid "Salida del hiperespacio."
+msgstr "Out of hyperspace."
+
+#: Game/Sandbox/Sandbox.cpp:1125
+msgid "Los comerciantes te identifican atacando a {}: reputación {}."
+msgstr "The traders identify you attacking {}: reputation {}."
+
+#: Game/Sandbox/Sandbox.cpp:1128
+msgid "Atacas a {} sin que nadie te identifique."
+msgstr "You attack {} without anyone identifying you."
+
+#: Game/Sandbox/Sandbox.cpp:1133
+msgid "¡Impacto! La nave está bajo fuego."
+msgstr "Hit! The ship is under fire."
+
+#: Game/Sandbox/Sandbox.cpp:1138
+msgid "Módulo fuera de servicio: {}."
+msgstr "Module out of service: {}."
+
+#: Game/Sandbox/Sandbox.cpp:1187
+msgid "¡Brecha en el reactor! Tu nave ha sido destruida."
+msgstr "Reactor breach! Your ship has been destroyed."
+
+#: Game/Sandbox/Sandbox.cpp:1192
+msgid "Tu cuenta con la Autoridad queda saldada: ya no te buscan."
+msgstr "Your debt to the Authority is settled: you are no longer wanted."
+
+#: Game/Sandbox/Sandbox.cpp:1199
+msgid "Objetivo destruido."
+msgstr "Target destroyed."
+
+#: Game/Sandbox/Sandbox.cpp:1207
+msgid "La Autoridad sabe que destruiste el patrullero {}: reputación {}."
+msgstr "The Authority knows you destroyed the patrol ship {}: reputation {}."
+
+#: Game/Sandbox/Sandbox.cpp:1212
+msgid "Los comerciantes saben que destruiste a {}: reputación {}."
+msgstr "The traders know you destroyed {}: reputation {}."
+
+#: Game/Sandbox/Sandbox.cpp:1288
+msgid "Rumbo a {}."
+msgstr "Heading to {}."
+
+#: Game/Sandbox/Sandbox.cpp:1290
+msgid "Rumbo a un punto del espacio."
+msgstr "Heading to a point in space."
+
+#: Game/Sandbox/Sandbox.cpp:1292
+msgid "Deteniendo la nave."
+msgstr "Stopping the ship."
+
+#: Game/Sandbox/Sandbox.cpp:1310
+msgid "Radar activado: ves más, pero todos te ven a ti."
+msgstr "Radar on: you see more, but everyone sees you."
+
+#: Game/Sandbox/Sandbox.cpp:1311
+msgid "Radar desactivado."
+msgstr "Radar off."
+
+#: Game/Sandbox/Sandbox.cpp:1316
+msgid "Transpondedor encendido."
+msgstr "Transponder on."
+
+#: Game/Sandbox/Sandbox.cpp:1317
+msgid "Transpondedor apagado: tu identidad ya no se difunde."
+msgstr "Transponder off: your identity is no longer broadcast."
+
+#: Game/Sandbox/Sandbox.cpp:1349
+msgid "Fuego sobre el contacto {}."
+msgstr "Firing on contact {}."
+
+#: Game/Sandbox/Sandbox.cpp:1351
+msgid "Interceptando el contacto {}."
+msgstr "Intercepting contact {}."
+
+#: Game/Sandbox/Sandbox.cpp:1353
+msgid "Alto el fuego."
+msgstr "Cease fire."
+
+#: Game/Sandbox/Sandbox.cpp:1378
+msgid "Para comerciar hay que estar atracado en un puerto."
+msgstr "You must be docked at a port to trade."
+
+#: Game/Sandbox/Sandbox.cpp:1389
+msgid "Ese bien no se comercia en este puerto."
+msgstr "That good is not traded at this port."
+
+#: Game/Sandbox/Sandbox.cpp:1398
+msgid "La bodega está llena."
+msgstr "The hold is full."
+
+#: Game/Sandbox/Sandbox.cpp:1399
+msgid "No quedan existencias."
+msgstr "Out of stock."
+
+#: Game/Sandbox/Sandbox.cpp:1400
+msgid "No tienes créditos suficientes."
+msgstr "Not enough credits."
+
+#: Game/Sandbox/Sandbox.cpp:1404
+msgid "Compras {} t de {} por {} cr (+{} cr de impuestos)."
+msgstr "You buy {} t of {} for {} cr (+{} cr in taxes)."
+
+#: Game/Sandbox/Sandbox.cpp:1415
+msgid "Vendes {} t de {} por {} cr (-{} cr de impuestos)."
+msgstr "You sell {} t of {} for {} cr (-{} cr in taxes)."
+
+#: Game/Sandbox/Sandbox.cpp:1436
+msgid "Tu nave no está en condiciones de abordar a nadie."
+msgstr "Your ship is in no condition to board anyone."
+
+#: Game/Sandbox/Sandbox.cpp:1441
+msgid "No encuentras ninguna nave en esa posición."
+msgstr "You find no ship at that position."
+
+#: Game/Sandbox/Sandbox.cpp:1448
+msgid "Demasiado lejos para abordar: acércate a menos de 5 km."
+msgstr "Too far to board: get within 5 km."
+
+#: Game/Sandbox/Sandbox.cpp:1452
+msgid "Iguala la velocidad con la otra nave para abordarla."
+msgstr "Match speed with the other ship to board it."
+
+#: Game/Sandbox/Sandbox.cpp:1457
+msgid "La nave resiste: no se puede abordar mientras tenga energía."
+msgstr "The ship resists: it cannot be boarded while it has power."
+
+#: Game/Sandbox/Sandbox.cpp:1469
+msgid "{} t de {}"
+msgstr "{} t of {}"
+
+#: Game/Sandbox/Sandbox.cpp:1470
+msgid "{}, {}"
+msgstr "{}, {}"
+
+#: Game/Sandbox/Sandbox.cpp:1476
+msgid "Abordas {}: {}. La tripulación abandona la nave."
+msgstr "You board {}: {}. The crew abandons ship."
+
+#: Game/Sandbox/Sandbox.cpp:1477
+msgid "no lleva carga"
+msgstr "it carries no cargo"
+
+#: Game/Sandbox/Sandbox.cpp:1477
+msgid "te llevas {}"
+msgstr "you take {}"
+
+#: Game/Sandbox/Sandbox.cpp:1482
+msgid "Los comerciantes lo saben: reputación {}."
+msgstr "The traders know: reputation {}."
+
+#: Game/Sandbox/Sandbox.cpp:1523
+msgid "Noticias: la Autoridad da de baja el patrullero {} por falta de fondos."
+msgstr "News: the Authority decommissions the patrol ship {} for lack of funds."
+
+#: Game/Sandbox/Sandbox.cpp:1541
+msgid "Noticias: la Autoridad pone en servicio el patrullero {}."
+msgstr "News: the Authority commissions the patrol ship {}."
+
+#: Game/Sandbox/Sandbox.cpp:1674
+msgid "La Autoridad te busca: el patrullero {} va a por ti."
+msgstr "The Authority wants you: the patrol ship {} is coming for you."
+
+#: Game/Sandbox/Sandbox.cpp:1740
+msgid "La Autoridad no tiene fondos para pagar la recompensa por {}."
+msgstr "The Authority has no funds to pay the bounty for {}."
+
+#: Game/Sandbox/Sandbox.cpp:1750
+msgid "Recompensa de la Autoridad: {} cr por {}."
+msgstr "Authority bounty: {} cr for {}."
+
+#: Game/Sandbox/SandboxContracts.cpp:52
+msgid "{} t de {} a {}"
+msgstr "{} t of {} to {}"
+
+#: Game/Sandbox/SandboxContracts.cpp:55
+msgid "abatir o capturar al pirata {} (visto cerca de {})"
+msgstr "destroy or capture the pirate {} (seen near {})"
+
+#: Game/Sandbox/SandboxContracts.cpp:78
+msgid "Noticias: {} cumple un contrato de suministro ({})."
+msgstr "News: {} completes a supply contract ({})."
+
+#: Game/Sandbox/SandboxContracts.cpp:90
+msgid "Contrato cumplido: {}. Cobras {} cr."
+msgstr "Contract completed: {}. You are paid {} cr."
+
+#: Game/Sandbox/SandboxContracts.cpp:96
+msgid "Contrato fallido: {}. Reputación {}."
+msgstr "Contract failed: {}. Reputation {}."
+
+#: Game/Sandbox/SandboxContracts.cpp:106
+msgid "Contrato cancelado: {}."
+msgstr "Contract cancelled: {}."
+
+#: Game/Sandbox/SandboxContracts.cpp:230
+msgid "Noticias: escasez de {} en {}. Contrato de suministro: {} cr."
+msgstr "News: shortage of {} at {}. Supply contract: {} cr."
+
+#: Game/Sandbox/SandboxContracts.cpp:270
+msgid "Noticias: se busca al pirata {}, visto cerca de {}. Recompensa: {} cr."
+msgstr "News: pirate {} wanted, seen near {}. Reward: {} cr."
+
+#: Game/Sandbox/SandboxContracts.cpp:290
+msgid "Ese contrato ya no existe."
+msgstr "That contract no longer exists."
+
+#: Game/Sandbox/SandboxContracts.cpp:303
+msgid "Ese contrato ya no está disponible."
+msgstr "That contract is no longer available."
+
+#: Game/Sandbox/SandboxContracts.cpp:305
+msgid "Los contratos se aceptan en el tablón de una estación."
+msgstr "Contracts are accepted at a station's board."
+
+#: Game/Sandbox/SandboxContracts.cpp:309
+msgid "Ya tienes tres contratos en curso."
+msgstr "You already have three contracts in progress."
+
+#: Game/Sandbox/SandboxContracts.cpp:315
+msgid "Contrato aceptado: {} ({} cr)."
+msgstr "Contract accepted: {} ({} cr)."
+
+#: Game/Sandbox/SandboxContracts.cpp:325
+msgid "Ese contrato no es de entrega o no es tuyo."
+msgstr "That contract is not a delivery or not yours."
+
+#: Game/Sandbox/SandboxContracts.cpp:327
+msgid "Tienes que estar atracado en el puerto de destino."
+msgstr "You must be docked at the destination port."
+
+#: Game/Sandbox/SandboxContracts.cpp:329
+msgid "No llevas ese bien en la bodega."
+msgstr "You carry none of that good."
+
+#: Game/Sandbox/SandboxContracts.cpp:339
+msgid "Entregas {} t: faltan {} t."
+msgstr "You deliver {} t: {} t to go."
+
+#: Game/Sandbox/SandboxContracts.cpp:347
+msgid "Ese contrato no es tuyo."
+msgstr "That contract is not yours."
+
+#: Game/Sandbox/SandboxContracts.cpp:355
+msgid "Acción de contrato no válida."
+msgstr "Invalid contract action."
+
+#: Game/Sandbox/SandboxFinance.cpp:119
+msgid "Noticias: la Mutua de Fletadores solo puede pagar {} de los {} cr del casco de {}."
+msgstr "News: the Freighters' Mutual can only pay {} of the {} cr for the hull of {}."
+
+#: Game/Sandbox/SandboxFinance.cpp:133
+msgid "Noticias: {} pierde su carguero y no puede comprar otro."
+msgstr "News: {} loses their hauler and cannot buy another."
+
+#: Game/Sandbox/SandboxFinance.cpp:152
+msgid "Noticias: el banco embarga el carguero de {} (deuda {} cr, pérdida {} cr)."
+msgstr "News: the bank repossesses the hauler of {} (debt {} cr, loss {} cr)."
+
+#: Game/Sandbox/SandboxFinance.cpp:154
+msgid "Noticias: {} vende su carguero."
+msgstr "News: {} sells their hauler."
+
+#: Game/Sandbox/SandboxFinance.cpp:278
+msgid "Noticias: la Mutua de Fletadores sube la prima del casco a {} cr/h por carguero."
+msgstr "News: the Freighters' Mutual raises the hull premium to {} cr/h per hauler."
+
+#: Game/Sandbox/SandboxFinance.cpp:280
+msgid "Noticias: la Mutua de Fletadores baja la prima del casco a {} cr/h por carguero."
+msgstr "News: the Freighters' Mutual lowers the hull premium to {} cr/h per hauler."
+
+#: Game/Sandbox/SandboxFinance.cpp:301
+msgid "Noticias: {} no consigue crédito para otro carguero y abandona el sistema."
+msgstr "News: {} gets no credit for another hauler and leaves the system."
+
+#: Game/Sandbox/SandboxFinance.cpp:344
+msgid "Noticias: {} vuelve con un carguero nuevo (crédito de {} cr)."
+msgstr "News: {} is back with a new hauler (a {} cr loan)."
+
+#: Game/Sandbox/SandboxFinance.cpp:346
+msgid "Noticias: {} vuelve con un carguero nuevo."
+msgstr "News: {} is back with a new hauler."
+
+#: Game/Sandbox/SandboxFinance.cpp:378
+msgid "Noticias: {} invierte sus ahorros en un segundo carguero, {}."
+msgstr "News: {} invests their savings in a second hauler, {}."
+
+#: Game/Sandbox/SandboxFinance.cpp:396
+msgid "{} llega al sistema con un carguero financiado por el banco."
+msgstr "{} arrives in the system with a bank-financed hauler."
+
+#: Game/Sandbox/SandboxFinance.cpp:411
+msgid "Noticias: el banco vuelve a financiar cargueros."
+msgstr "News: the bank is financing haulers again."
+
+#: Game/Sandbox/SandboxFinance.cpp:412
+msgid "Noticias: el banco deja de financiar cargueros: se espera que ganen {} cr/h, {} tras la prima, y la deuda costaría {}."
+msgstr "News: the bank stops financing haulers: they are expected to earn {} cr/h, {} after the premium, and the debt would cost {}."
+
+#: Space/Generation/StarSystemGenerator.cpp:29
+msgid "Atalaya"
+msgstr "Watchtower"
+
+#: Space/Generation/StarSystemGenerator.cpp:29
+msgid "Puerto"
+msgstr "Port"
+
+#: Space/Generation/StarSystemGenerator.cpp:30
+msgid "Enclave"
+msgstr "Enclave"
+
+#: Space/Generation/StarSystemGenerator.cpp:30
+msgid "Muelle"
+msgstr "Dock"
+
+#: Space/Generation/StarSystemGenerator.cpp:30
+msgid "Relé"
+msgstr "Relay"

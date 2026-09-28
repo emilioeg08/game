@@ -2,6 +2,7 @@
 
 #include "Engine/Core/Assert.h"
 #include "Engine/Core/Random.h"
+#include "Engine/Text/Localization.h"
 #include "Simulation/World/World.h"
 
 #include <array>
@@ -24,8 +25,9 @@ constexpr std::array<const char*, 12> kNameMiddles = {"",   "a",  "e",  "i",  "o
 constexpr std::array<const char*, 12> kNameEnds = {"ra",  "nis", "thos", "dar", "mir",  "vel",
                                                    "zar", "lon", "ssa",  "tis", "gorn", "ven"};
 constexpr std::array<const char*, 9> kRoman = {"I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX"};
-constexpr std::array<const char*, 6> kStationTitles = {"Puerto", "Estación", "Atalaya",
-                                                       "Muelle", "Enclave",  "Relé"};
+// Titles of station names ("Estación Arenmir IV"): translated where names are shown (ADR-036).
+constexpr std::array<const char*, 6> kStationTitles = {GX_TEXT("Puerto"), GX_TEXT("Estación"), GX_TEXT("Atalaya"),
+                                                       GX_TEXT("Muelle"), GX_TEXT("Enclave"),  GX_TEXT("Relé")};
 
 template <typename T, usize N>
 const T& pick(Rng& rng, const std::array<T, N>& items) {

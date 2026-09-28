@@ -12,6 +12,7 @@
 #include "Engine/Profiling/Profiler.h"
 #include "Engine/Serialization/Binary.h"
 #include "Engine/Serialization/SaveFile.h"
+#include "Engine/Text/Localization.h"
 #include "Engine/Time/Stopwatch.h"
 #include "Engine/Time/TimeController.h"
 #include "Game/Sandbox/Content.h"
@@ -25,6 +26,9 @@
 #include <charconv>
 #include <chrono>
 #include <cstdio>
+#include <filesystem>
+#include <fstream>
+#include <iterator>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -61,6 +65,7 @@ struct Options {
     u32 patrols = 3;
     bool traderContracts = true;
     bool finance = true;
+    std::string language; // journal language: a catalog in data/lang (default: Spanish, the source)
     u32 maxHaulers = 0;
     i32 flyTo = -1;       // order the player's ship to this port at the start
     bool journal = false; // print the game journal at the end
@@ -94,6 +99,7 @@ void printUsage() {
                 "  --max-haulers <n>   sandbox: most traders the business can grow to (default 2x)\n"
                 "  --fly-to <i>        sandbox: send the player's ship to port i at the start\n"
                 "  --journal           sandbox: print the game journal at the end\n"
+                "  --lang <code>       sandbox: journal language, a catalog in data/lang (e.g. en)\n"
                 "  --markets           sandbox: print every port's market at the end\n"
                 "  --dump              sandbox: print every hauler and patrol at the end\n"
                 "  --log-level <lvl>   trace|debug|info|warn|error (default info)\n");
@@ -158,6 +164,9 @@ int parseOptions(int argc, char** argv, Options& options) {
             ok = parseNumber(value(), options.pirates);
         } else if (arg == "--no-trader-contracts") {
             options.traderContracts = false;
+        } else if (arg == "--lang") {
+            options.language = std::string(value());
+            ok = !options.language.empty();
         } else if (arg == "--no-finance") {
             options.finance = false;
         } else if (arg == "--max-haulers") {
@@ -596,9 +605,27 @@ int runSandbox(const Options& options) {
         }
     }
     if (options.journal) {
+        // Next to the executable (a package), else in the source tree (a build).
+        Catalog catalog;
+        const Catalog* language = nullptr;
+        if (!options.language.empty() && options.language != "es") {
+            for (const std::filesystem::path& dir :
+                 {std::filesystem::path("data"), std::filesystem::path(GX_SOURCE_DATA_DIR)}) {
+                std::ifstream in(dir / "lang" / (options.language + ".po"), std::ios::binary);
+                std::string error;
+                if (in && catalog.loadPo(std::string(std::istreambuf_iterator<char>(in), {}), error)) {
+                    language = &catalog;
+                    break;
+                }
+            }
+            if (language == nullptr) {
+                GX_LOG_WARN(kChannel, "no catalog for language '{}': the journal stays in Spanish",
+                            options.language);
+            }
+        }
         for (const JournalEntry& entry : sandbox.journal()) {
             std::printf("  %s  %s\n", formatSimTime(entry.time, content::kEpochYear).c_str(),
-                        entry.text.c_str());
+                        render(entry.text, language).c_str());
         }
     }
     const SandboxStats& stats = sandbox.stats();
