@@ -34,6 +34,8 @@ enum ShipClass : u32 {
     kShipClassHauler = 1,
     kShipClassRaider = 2,
     kShipClassPatrol = 3,
+    kShipClassMiner = 4,
+    kShipClassEscort = 5,
     kShipClassCount
 };
 
@@ -48,10 +50,13 @@ struct ShipClassDef {
 
 // Real-time scale (x1 = real time, ADR-021): a trip between planets takes minutes at x1, seconds at x10.
 inline constexpr std::array<ShipClassDef, kShipClassCount> kShipClasses = {{
-    {GX_TEXT("Correo"), 50'000.0, 15'000'000.0, 1.5e9, 5.0, 40.0},     // 1 AU in hyperspace: ~100 s
-    {GX_TEXT("Carguero"), 15'000.0, 6'000'000.0, 6.0e8, 12.0, 120.0},  // 1 AU in hyperspace: ~250 s
-    {GX_TEXT("Corsario"), 40'000.0, 12'000'000.0, 1.2e9, 6.0, 60.0},   // hunts haulers where they drop out
-    {GX_TEXT("Patrullero"), 45'000.0, 14'000'000.0, 1.4e9, 5.0, 70.0}, // the Authority's: faster than a raider
+    {GX_TEXT("Correo"), 50'000.0, 15'000'000.0, 1.5e9, 5.0, 40.0},    // 1 AU in hyperspace: ~100 s
+    {GX_TEXT("Carguero"), 15'000.0, 6'000'000.0, 6.0e8, 12.0, 120.0}, // 1 AU in hyperspace: ~250 s
+    {GX_TEXT("Corsario"), 40'000.0, 12'000'000.0, 1.2e9, 6.0, 60.0},  // hunts haulers where they drop out
+    {GX_TEXT("Patrullero"), 45'000.0, 14'000'000.0, 1.4e9, 5.0,
+     70.0},                                                         // the Authority's: faster than a raider
+    {GX_TEXT("Minero"), 12'000.0, 5'000'000.0, 5.5e8, 14.0, 110.0}, // slow and heavy: lasers and a big hold
+    {GX_TEXT("Escolta"), 42'000.0, 15'000'000.0, 1.5e9, 5.0, 65.0}, // keeps up with a Correo
 }};
 
 // Sensors and signatures (ADR-023). Emission units are arbitrary; ranges follow from the SNR formulas:
@@ -67,10 +72,12 @@ struct SensorDef {
 };
 
 inline constexpr std::array<SensorDef, kShipClassCount> kShipSensors = {{
-    {1e3, 1e6, 1e3, 1e12, 6.25e34}, // Correo: small, quiet, good sensors and a radar
-    {5e3, 2e6, 1e4, 5e11, 0.0},     // Carguero: bigger and louder, basic passive sensors only
-    {2e3, 1.5e6, 3e3, 1e12, 3e34},  // Corsario: quiet while it waits; its radar is for the kill
-    {3e3, 1.5e6, 5e3, 2e12, 5e34},  // Patrullero: overt (radar on), the best sensors in the system
+    {1e3, 1e6, 1e3, 1e12, 6.25e34},    // Correo: small, quiet, good sensors and a radar
+    {5e3, 2e6, 1e4, 5e11, 0.0},        // Carguero: bigger and louder, basic passive sensors only
+    {2e3, 1.5e6, 3e3, 1e12, 3e34},     // Corsario: quiet while it waits; its radar is for the kill
+    {3e3, 1.5e6, 5e3, 2e12, 5e34},     // Patrullero: overt (radar on), the best sensors in the system
+    {6e3, 2e6, 1.2e4, 5e11, 0.0},      // Minero: a Carguero's sensors on a bigger, warmer hull (the lasers)
+    {2.5e3, 1.5e6, 4e3, 1.5e12, 4e34}, // Escolta: a light warship with a fire-control radar
 }};
 
 // Weapons (ADR-025). Beams: damage per second while the aim error stays within the hull. Railguns: damage
@@ -88,8 +95,9 @@ inline std::vector<WeaponDef> weaponTable() {
 
 // Display names of the module types, indexed by ModuleType.
 inline constexpr std::array<const char*, static_cast<usize>(ModuleType::Count)> kModuleNames = {
-    GX_TEXT("Estructura"), GX_TEXT("Reactor"), GX_TEXT("Motor"),  GX_TEXT("Hipermotor"),
-    GX_TEXT("Sensores"),   GX_TEXT("Arma"),    GX_TEXT("Bodega"), GX_TEXT("Habitáculo")};
+    GX_TEXT("Estructura"), GX_TEXT("Reactor"),    GX_TEXT("Motor"),
+    GX_TEXT("Hipermotor"), GX_TEXT("Sensores"),   GX_TEXT("Arma"),
+    GX_TEXT("Bodega"),     GX_TEXT("Habitáculo"), GX_TEXT("Láser de minería")};
 
 struct ModuleDef {
     ModuleType type;
@@ -143,6 +151,30 @@ inline constexpr std::array<ModuleDef, 9> kPatrolModules = {{
     {ModuleType::Quarters, 100.0},
 }};
 
+inline constexpr std::array<ModuleDef, 9> kMinerModules = {{
+    {ModuleType::Structure, 650.0},
+    {ModuleType::Reactor, 160.0},
+    {ModuleType::Drive, 180.0},
+    {ModuleType::HyperDrive, 140.0},
+    {ModuleType::Sensors, 80.0},
+    {ModuleType::Mining, 150.0},
+    {ModuleType::Mining, 150.0},
+    {ModuleType::Cargo, 500.0},
+    {ModuleType::Quarters, 120.0},
+}};
+
+inline constexpr std::array<ModuleDef, 9> kEscortModules = {{
+    {ModuleType::Structure, 550.0},
+    {ModuleType::Reactor, 150.0},
+    {ModuleType::Drive, 170.0},
+    {ModuleType::HyperDrive, 130.0},
+    {ModuleType::Sensors, 110.0},
+    {ModuleType::Weapon, 90.0, kWeaponLaser},
+    {ModuleType::Weapon, 90.0, kWeaponLaser},
+    {ModuleType::Weapon, 90.0, kWeaponRailgun},
+    {ModuleType::Quarters, 100.0},
+}};
+
 inline std::span<const ModuleDef> shipModules(u32 shipClass) {
     switch (shipClass) {
     case kShipClassCourier:
@@ -151,6 +183,10 @@ inline std::span<const ModuleDef> shipModules(u32 shipClass) {
         return kHaulerModules;
     case kShipClassPatrol:
         return kPatrolModules;
+    case kShipClassMiner:
+        return kMinerModules;
+    case kShipClassEscort:
+        return kEscortModules;
     default:
         return kRaiderModules;
     }
@@ -181,7 +217,7 @@ inline std::vector<GoodDef> goodTable() {
             {GX_TEXT("Combustible"), 50.0}, {GX_TEXT("Metales"), 120.0},  {GX_TEXT("Maquinaria"), 300.0}};
 }
 
-inline constexpr std::array<u32, kShipClassCount> kCargoCapacity = {20, 100, 30, 0}; // tonnes
+inline constexpr std::array<u32, kShipClassCount> kCargoCapacity = {20, 100, 30, 0, 120, 0}; // tonnes
 inline constexpr i64 kPlayerStartCredits = 2'000;
 inline constexpr i64 kHaulerStartCredits = 3'000;
 inline constexpr f64 kMarketStockHours = 4.0; // target stock: four hours of the larger of output and use
@@ -282,6 +318,49 @@ inline constexpr f64 kLossRatePrior = 0.07;      // hull losses per ship-hour be
 inline constexpr f64 kClaimCostPrior = 550.0;    // cr of claims per ship-hour: those losses and repairs
 inline constexpr f64 kLossRatePriorHours = 40.0; // how many ship-hours of experience the prior weighs
 inline constexpr f64 kPremiumNewsChange = 0.25;  // a premium move this large makes the news
+
+// --- Mining (ADR-037)
+// ----------------------------------------------------------------------------------------- Asteroid fields
+// hold deposits: rock gives ore, ice gives water. A deposit refills at a constant rate up to its size (new
+// rocks drift into reach), so a field sustains its recovery rate and no more: mine it faster and it runs dry
+// until it recovers.
+inline constexpr f64 kFieldDeposit = 4'000.0;     // t
+inline constexpr f64 kRockFieldRecovery = 120.0;  // t/h
+inline constexpr f64 kIceFieldRecovery = 150.0;   // t/h
+inline constexpr f64 kMiningRatePerModule = 60.0; // t/h per mining laser at full health
+inline constexpr f64 kMiningRange = 60'000.0;     // m from the field's centre (its extent)
+inline constexpr f64 kMiningSpeed = 200.0;        // m/s relative to the field: faster, the lasers cannot hold
+
+inline constexpr Good fieldGood(BodyKind kind) {
+    return kind == BodyKind::IceField ? kGoodWater : kGoodOre;
+}
+
+// --- The player's company (ADR-037)
+// --------------------------------------------------------------------------- Ships the player buys at a
+// station's yards, crewed by hired captains who follow standing orders. One account pays for everything; the
+// bank lends against the fleet's hulls and the mutual insures them.
+inline constexpr std::array<i64, kShipClassCount> kShipPrices = {4'000, 6'000, 0, 0, 5'500, 7'000};
+inline constexpr std::array<i64, kShipClassCount> kShipWagesPerMinute = {0, 5, 0, 0, 6, 8}; // crews
+inline constexpr std::array<u32, 3> kShipsForSale = {kShipClassHauler, kShipClassMiner, kShipClassEscort};
+inline constexpr usize kMaxFleet = 12;          // ships besides the one the player flies
+inline constexpr f64 kShipResale = 0.7;         // of the hull value, selling to the yards
+inline constexpr i64 kFleetCashReserve = 1'000; // automatic trade never spends the account below this
+// Insured hauler-hours at which the company's own record weighs as much as the mutual's. Experience fades
+// (kExperienceHalfLife), so one ship's record never exceeds ~2.9 hauler-hours: it earns a third of the
+// weight, a fleet of five, two thirds.
+inline constexpr f64 kCredibilityHours = 5.0;
+// Overdrawn beyond what the cargo on board will fetch for this long, a ship is sold (illiquid is not
+// insolvent: a miner on its way to market with a full hold covers the bills it will pay).
+inline constexpr SimDuration kArrearsGrace = SimDuration::minutes(30);
+inline constexpr f64 kEscortStandoff = 3'000.0; // m from the flagship
+inline constexpr f64 kEscortEngageRange = 3e8;  // m from the flagship: raiders nearer than this are engaged
+inline constexpr f64 kEscortLeash = 6e8;        // m: escorts break off a chase this far from the flagship
+inline constexpr f64 kFleetRetreatStructure = 0.4; // escorts go for repairs below this
+inline constexpr f64 kFleetRepairedStructure = 0.9;
+
+inline constexpr std::array<const char*, 12> kFleetNames = {"Aurora",  "Boreal",  "Cénit",   "Delfín",
+                                                            "Eclipse", "Fortuna", "Gaviota", "Horizonte",
+                                                            "Iris",    "Júpiter", "Kraken",  "Lucero"};
 
 enum class PortRole : u8 { Planet, Refinery, Factory, Industry };
 

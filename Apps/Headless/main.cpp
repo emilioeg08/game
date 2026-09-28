@@ -27,11 +27,13 @@
 #include <chrono>
 #include <cstdio>
 #include <filesystem>
+#include <format>
 #include <fstream>
 #include <iterator>
 #include <string>
 #include <string_view>
 #include <thread>
+#include <vector>
 
 using namespace gx;
 
@@ -71,6 +73,12 @@ struct Options {
     bool journal = false; // print the game journal at the end
     bool markets = false; // print every port's market at the end
     bool dump = false;    // print every hauler and patrol at the end
+    // The player's company (ADR-037): ships bought at the start, with standing orders.
+    u32 miners = 0;         // mine the rock fields
+    u32 iceMiners = 0;      // mine the ice field
+    u32 fleetHaulers = 0;   // trade on their own
+    u32 escorts = 0;        // escort the player's ship
+    i64 companyCredits = 0; // added to the starting account
 };
 
 void printUsage() {
@@ -102,6 +110,12 @@ void printUsage() {
                 "  --lang <code>       sandbox: journal language, a catalog in data/lang (e.g. en)\n"
                 "  --markets           sandbox: print every port's market at the end\n"
                 "  --dump              sandbox: print every hauler and patrol at the end\n"
+                "  --miners <n>        sandbox: the player's company buys n Mineros for the rock fields\n"
+                "  --ice-miners <n>    sandbox: ... and n for the ice field\n"
+                "  --fleet-haulers <n> sandbox: ... n Cargueros that trade on their own\n"
+                "  --escorts <n>       sandbox: ... n Escoltas for the player's ship\n"
+                "  --company-credits <n>  sandbox: added to the company's starting account (default 0;\n"
+                "                      ships it cannot pay for are financed with the least down payment)\n"
                 "  --log-level <lvl>   trace|debug|info|warn|error (default info)\n");
 }
 
@@ -181,6 +195,16 @@ int parseOptions(int argc, char** argv, Options& options) {
             options.markets = true;
         } else if (arg == "--dump") {
             options.dump = true;
+        } else if (arg == "--miners") {
+            ok = parseNumber(value(), options.miners);
+        } else if (arg == "--ice-miners") {
+            ok = parseNumber(value(), options.iceMiners);
+        } else if (arg == "--fleet-haulers") {
+            ok = parseNumber(value(), options.fleetHaulers);
+        } else if (arg == "--escorts") {
+            ok = parseNumber(value(), options.escorts);
+        } else if (arg == "--company-credits") {
+            ok = parseNumber(value(), options.companyCredits) && options.companyCredits >= 0;
         } else if (arg == "--no-profile") {
             options.profile = false;
         } else if (arg == "--log-level") {
@@ -319,8 +343,8 @@ void printEconomy(const Simulation& simulation, const Sandbox& sandbox, bool per
     const ComponentStore<Market>& markets = world.components<Market>();
     const ComponentStore<CargoHold>& holds = world.components<CargoHold>();
     const SandboxStats& stats = sandbox.stats();
-    std::printf("economy: %-12s %9s %9s %9s %7s %9s %7s %7s %7s  %s\n", "good", "produced", "consumed",
-                "shortage", "lost", "stock", "cargo", "min cr", "max cr", "balance");
+    std::printf("economy: %-12s %9s %9s %7s %9s %7s %9s %7s %7s %7s  %s\n", "good", "produced", "consumed",
+                "mined", "shortage", "lost", "stock", "cargo", "min cr", "max cr", "balance");
     for (GoodId g = 0; g < goods.size(); ++g) {
         f64 produced = 0.0;
         f64 consumed = 0.0;
@@ -343,12 +367,16 @@ void printEconomy(const Simulation& simulation, const Sandbox& sandbox, bool per
         for (const CargoHold& hold : holds.values()) {
             cargo += hold.amount(g);
         }
+        f64 mined = 0.0;
+        for (const Deposit& deposit : world.components<Deposit>().values()) {
+            mined += deposit.good == g ? deposit.extracted : 0.0;
+        }
         const f64 lost = g < stats.cargoLost.size() ? static_cast<f64>(stats.cargoLost[g]) : 0.0;
         const f64 initial = g < sandbox.initialStock().size() ? sandbox.initialStock()[g] : 0.0;
-        // initial + produced - consumed - lost must equal what is in the markets and in the holds.
-        const f64 balance = initial + produced - consumed - lost - stock - cargo;
-        std::printf("economy: %-12s %9.0f %9.0f %9.0f %7.0f %9.0f %7.0f %7.0f %7.0f  %+.3f\n",
-                    goods[g].name.c_str(), produced, consumed, shortage, lost, stock, cargo, minPrice,
+        // initial + produced + mined - consumed - lost must equal what is in the markets and in the holds.
+        const f64 balance = initial + produced + mined - consumed - lost - stock - cargo;
+        std::printf("economy: %-12s %9.0f %9.0f %7.0f %9.0f %7.0f %9.0f %7.0f %7.0f %7.0f  %+.3f\n",
+                    goods[g].name.c_str(), produced, consumed, mined, shortage, lost, stock, cargo, minPrice,
                     maxPrice, balance);
     }
     i64 haulerCredits = 0;
@@ -485,6 +513,88 @@ int runSandbox(const Options& options) {
                                               {}});
     }
 
+    // The player's company: ships bought at the home station's yards (cash if the account allows, else the
+    // least down payment the bank accepts), then their standing orders.
+    sandbox.account().credits += options.companyCredits;
+    const auto buy = [&](u32 shipClass) -> EntityId {
+        const World& world = simulation.world();
+        const i64 price = content::kShipPrices[shipClass];
+        const i64 account = sandbox.company().account.credits;
+        i64 down = price;
+        if (account < price && config.finance) {
+            const auto room = static_cast<i64>((1.0 - content::kMinDownPayment) *
+                                               static_cast<f64>(sandbox.fleetValue(world) + price)) -
+                              sandbox.company().debt;
+            down = std::max<i64>(price - room, 0);
+        }
+        const usize before = world.components<FleetBrain>().size();
+        simulation.submitCommand(BuyShipCommand{sandbox.playerShip(), shipClass, down, true});
+        simulation.runFor(SimDuration::seconds(1));
+        const ComponentStore<FleetBrain>& brains = simulation.world().components<FleetBrain>();
+        if (brains.size() == before) {
+            GX_LOG_WARN(kChannel, "the company could not buy a {} ({} cr down, {} cr in the account)",
+                        content::kShipClasses[shipClass].name, down, account);
+            return {};
+        }
+        return brains.entities().back();
+    };
+    std::vector<EntityId> rockFields;
+    std::vector<EntityId> iceFields;
+    for (const EntityId field : sandbox.fields()) {
+        (simulation.world().components<CelestialBody>().get(field).kind == BodyKind::IceField ? iceFields
+                                                                                              : rockFields)
+            .push_back(field);
+    }
+    const auto order = [&](EntityId ship, FleetOrder what, EntityId site) {
+        if (ship.isValid()) {
+            simulation.submitCommand(FleetOrderCommand{ship, what, site, {}});
+        }
+    };
+    // All the miners work the rock field nearest to the home station: one escort can cover them all.
+    if (!rockFields.empty()) {
+        const Vec3d home = bodyStateAt(simulation.world(), sandbox.homePort(), simulation.now()).position;
+        std::sort(rockFields.begin(), rockFields.end(), [&](EntityId a, EntityId b) {
+            return length(bodyStateAt(simulation.world(), a, simulation.now()).position - home) <
+                   length(bodyStateAt(simulation.world(), b, simulation.now()).position - home);
+        });
+    }
+    for (u32 i = 0; i < options.miners && !rockFields.empty(); ++i) {
+        order(buy(content::kShipClassMiner), FleetOrder::Mine, rockFields.front());
+    }
+    for (u32 i = 0; i < options.iceMiners && !iceFields.empty(); ++i) {
+        order(buy(content::kShipClassMiner), FleetOrder::Mine, iceFields[i % iceFields.size()]);
+    }
+    for (u32 i = 0; i < options.fleetHaulers; ++i) {
+        order(buy(content::kShipClassHauler), FleetOrder::Trade, {});
+    }
+    // Escorts guard the miners first (one each, in order), then the player's ship.
+    std::vector<EntityId> wards;
+    for (const EntityId ship : simulation.world().components<FleetBrain>().entities()) {
+        if (simulation.world().components<ShipIdentity>().get(ship).shipClass == content::kShipClassMiner) {
+            wards.push_back(ship);
+        }
+    }
+    for (u32 i = 0; i < options.escorts; ++i) {
+        order(buy(content::kShipClassEscort), FleetOrder::Escort, i < wards.size() ? wards[i] : EntityId{});
+    }
+    const bool company = options.miners + options.iceMiners + options.fleetHaulers + options.escorts > 0;
+    // Where the ore goes: the bid of every market that uses it (price and stock against its target).
+    const auto oreBids = [&] {
+        std::string out;
+        const ComponentStore<Market>& markets = simulation.world().components<Market>();
+        for (usize i = 0; i < markets.size(); ++i) {
+            const MarketGood* ore = markets.values()[i].find(content::kGoodOre);
+            if (ore != nullptr && consumptionRate(markets.values()[i], content::kGoodOre) > 0.0) {
+                out += std::format(
+                    " {} {} cr/t (x{:.2f})",
+                    simulation.world().components<CelestialBody>().get(markets.entities()[i]).name,
+                    sellPrice(*ore, sandbox.economy().basePrice(content::kGoodOre)),
+                    ore->target > 0.0 ? ore->stock / ore->target : 0.0);
+            }
+        }
+        return out;
+    };
+
     const Stopwatch wall;
     const SimTime end = simulation.now() + SimDuration::minutes(options.minutes);
     const SimDuration report = SimDuration::minutes(std::max<u32>(1, options.minutes / 10));
@@ -510,6 +620,46 @@ int runSandbox(const Options& options) {
                 "cash {:>6} loans {:>6} deposits {:>6} | mutual {:>6}",
                 stats.tonnesDelivered, sandbox.expectedEarningsPerHour(), sandbox.premiumPerHour(),
                 sandbox.bank().cash, sandbox.bank().loans, sandbox.bank().deposits, sandbox.mutual().fund);
+        }
+        if (company) {
+            const CompanyBooks& books = sandbox.company();
+            const CompanyTotals& t = books.totals;
+            GX_LOG_INFO(
+                kChannel,
+                "    company | account {:>7} debt {:>6} | {} ships worth {:>6} | net worth {:>7} | mined "
+                "{:>5} t | sales {:>7} | wages {:>6} premiums {:>6} interest {:>5} | lost {} | premium "
+                "{:.0f} cr/h per Carguero",
+                books.account.credits, books.debt, world.components<FleetBrain>().size(),
+                sandbox.fleetValue(world), sandbox.companyWorth(world), t.tonnesMined, t.sales, t.wages,
+                t.premiums, t.interest, t.shipsLost,
+                sandbox.companyPremiumPerHour(content::kHaulerHullPrice));
+            GX_LOG_INFO(kChannel, "    ore bids |{}", oreBids());
+        }
+    }
+    std::printf("ore:%s\n", oreBids().c_str());
+    if (company) {
+        const World& world = simulation.world();
+        const ComponentStore<FleetBrain>& brains = world.components<FleetBrain>();
+        std::printf("company fleet (income - expenses since bought):\n");
+        for (usize i = 0; i < brains.size(); ++i) {
+            const EntityId ship = brains.entities()[i];
+            const OwnedShip* owned = world.components<OwnedShip>().tryGet(ship);
+            const CargoHold& hold = world.components<CargoHold>().get(ship);
+            std::printf(
+                "  %-14s %-9s %-7s %-10s trips %3u | income %7lld expenses %7lld net %7lld | cargo %3u t\n",
+                world.components<ShipIdentity>().get(ship).name.c_str(),
+                content::kShipClasses[world.components<ShipIdentity>().get(ship).shipClass].name,
+                toString(brains.values()[i].order), toString(brains.values()[i].task),
+                brains.values()[i].trips, static_cast<long long>(owned != nullptr ? owned->income : 0),
+                static_cast<long long>(owned != nullptr ? owned->expenses : 0),
+                static_cast<long long>(owned != nullptr ? owned->income - owned->expenses : 0), hold.used());
+        }
+        for (const EntityId field : sandbox.fields()) {
+            const Deposit& deposit = world.components<Deposit>().get(field);
+            std::printf("  field %-24s %-6s reserve %6.0f / %6.0f t | extracted %7.0f t\n",
+                        world.components<CelestialBody>().get(field).name.c_str(),
+                        content::goodTable()[deposit.good].name.c_str(), deposit.reserve, deposit.size,
+                        deposit.extracted);
         }
     }
     const World& world = simulation.world();

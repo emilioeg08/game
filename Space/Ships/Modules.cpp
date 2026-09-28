@@ -26,6 +26,8 @@ const char* toString(ModuleType type) {
         return "Cargo";
     case ModuleType::Quarters:
         return "Quarters";
+    case ModuleType::Mining:
+        return "Mining";
     case ModuleType::Count:
         break;
     }

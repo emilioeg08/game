@@ -344,3 +344,56 @@ ellas, en 11 y 9 de 12. Las patrullas mejoran la media, pero por trayectoria sol
 **Coste:** `Game.Finance` recorre los cargueros una vez por minuto. A igual flota (tope de 12), 8 h de
 sandbox tardan 1,92 s con finanzas y 1,95 s sin ellas (3 ejecuciones cada una): diferencia dentro del ruido.
 Una flota de 24 cargueros cuesta un ~7 % más de tiempo de simulación.
+
+## M4 — La empresa del jugador y la minería (2026-09-28)
+
+Linux (contenedor de 4 hilos, GCC 13.3, Release). `gx_headless --sandbox --minutes 480` con las opciones de
+empresa de M4 (`--miners`, `--ice-miners`, `--fleet-haulers`, `--escorts`, `--company-credits`). El
+beneficio es la variación del patrimonio de la empresa (cuenta + cascos a precio de compra + carga − deuda)
+en 8 h.
+
+**La línea base NPC no cambia.** El cinturón añade tres cuerpos, así que los identificadores y los flujos
+aleatorios por nave se desplazan. Los corsarios, además, pueden acechar en un campo si ven naves cerca. Aun
+así, las medias de 4 semillas × 3 trayectorias quedan dentro del ruido de M3.5:
+
+| Piratas | Entregas M3.5 → M4 | Escasez M3.5 → M4 | Cargueros perdidos | Flota final | Prima |
+|---|---|---|---|---|---|
+| 0 | 10.722 → 10.913 t | 300 → 216 t | 0 → 0 | 20,0 → 19,8 | 253 → 253 cr/h |
+| 3 | 9.052 → 8.779 t | 771 → 672 t | 8,8 → 6,2 | 20,0 → 18,4 | 720 → 631 cr/h |
+| 6 | 6.207 → 6.522 t | 1.525 → 1.242 t | 12,7 → 14,1 | 18,9 → 15,2 | 921 → 1.038 cr/h |
+
+**Minería en paz** (`--pirates 0 --company-credits 30000`, los Mineros comprados al contado):
+
+| Semilla | 1 Minero: beneficio / minado | 2 Mineros | 4 Mineros | Mineral en la refinería (0 → 4 Mineros) |
+|---|---|---|---|---|
+| 2400 | +9.864 cr / 730 t | +21.222 cr / 1.459 t | +36.680 cr / 2.900 t | 22 → 11 cr/t |
+| 7 | +5.590 / 634 | +12.756 / 1.290 | +18.008 / 2.506 | 15 → 9 |
+| 99 | +8.594 / 598 | +23.958 / 1.198 | +39.908 / 2.396 | 24 → 19 |
+| 12345 | +3.417 / 541 | +6.555 / 1.080 | +10.184 / 2.130 | 17 → 10 |
+
+- Por minero y hora: 858 cr/h con uno, 1.008 con dos (la empresa asegura más horas sin siniestros y paga
+  menos prima) y 819 con cuatro (el mineral pierde un 37 % de precio en la refinería).
+- **Antes de elegir el mercado por ciclo**, un Minero en la semilla 2400 ganaba 514 cr/h: vendía a 12 cr/t
+  en un planeta que ya produce mineral. Con renovación-recompensa (ADR-038) gana 1.195 cr/h.
+
+**Minería con 3 piratas** (capital de 30.000 cr; los Mineros en el campo de roca más cercano a casa; las
+Escoltas protegen al primero):
+
+| Semilla | 3 Mineros | 3 Mineros + 1 Escolta | 3 Mineros + 2 Escoltas |
+|---|---|---|---|
+| 2400 | −6.224 cr, 600 t, 2 perdidos | +1.645 cr, 2.217 t, 0 | +4.047 cr, 2.216 t, 0 |
+| 7 | −3.018, 824 t, 0 | +2.294, 1.870 t, 0 | +119, 1.905 t, 0 |
+| 99 | −375, 720 t, 2 | −17.398, 360 t, 2 | −5.085, 1.261 t, 1 |
+| 12345 | −5.169, 1.080 t, 1 | −3.295, 1.528 t, 0 | −14.320, 960 t, 2 |
+
+- Una Escolta concentrada con los Mineros evita las pérdidas en 3 de 4 semillas y duplica o triplica el
+  tonelaje. La segunda solo compensa donde las pérdidas son altas. La semilla 99 es una guerra perdida: la
+  refinería se queda sin mineral (81 cr/t) y los comerciantes entregan un 60 % menos.
+- Con las Escoltas repartidas entre dos campos y el precio inicial (8.000 cr y 720 cr/h de tripulación),
+  tres Escoltas daban entre −20.000 y +10.000 cr: por eso se abarataron (7.000 cr y 480 cr/h) y los Mineros
+  se concentran en un campo.
+
+**Coste:** 8 h de sandbox en paz con 12 cargueros tardan 1,85 s de media; con 8 naves de empresa más
+(4 Mineros, 2 Cargueros y 2 Escoltas), 2,43 s (3 ejecuciones cada una). Un 31 % más de tiempo para un 67 %
+más de naves. Lo que más crece son los sensores: cada nave de la flota es otro sensor de la facción del
+jugador.

@@ -26,8 +26,14 @@ constexpr std::array<const char*, 12> kNameEnds = {"ra",  "nis", "thos", "dar", 
                                                    "zar", "lon", "ssa",  "tis", "gorn", "ven"};
 constexpr std::array<const char*, 9> kRoman = {"I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX"};
 // Titles of station names ("Estación Arenmir IV"): translated where names are shown (ADR-036).
-constexpr std::array<const char*, 6> kStationTitles = {GX_TEXT("Puerto"), GX_TEXT("Estación"), GX_TEXT("Atalaya"),
-                                                       GX_TEXT("Muelle"), GX_TEXT("Enclave"),  GX_TEXT("Relé")};
+constexpr std::array<const char*, 6> kStationTitles = {GX_TEXT("Puerto"),  GX_TEXT("Estación"),
+                                                       GX_TEXT("Atalaya"), GX_TEXT("Muelle"),
+                                                       GX_TEXT("Enclave"), GX_TEXT("Relé")};
+constexpr std::array<const char*, 2> kRockFieldTitles = {GX_TEXT("Campo"), GX_TEXT("Cantera")};
+constexpr std::array<const char*, 2> kIceFieldTitles = {GX_TEXT("Glaciar"), GX_TEXT("Témpano")};
+constexpr u32 kBeltFields = 3;     // the last one is icy
+constexpr f64 kFieldRadius = 60e3; // m: the extent of the cluster (display and mining range)
+constexpr f64 kBeltSpread = 0.04;  // fields spread +-4% around the belt's radius
 
 template <typename T, usize N>
 const T& pick(Rng& rng, const std::array<T, N>& items) {
@@ -190,6 +196,42 @@ StarSystemDesc generateStarSystem(u64 seed) {
         station.parent = hostIndex;
         station.orbit = randomOrbit(rng, host.radius + rng.uniform(400e3, 2000e3), 0.001, 0.1);
         system.bodies.push_back(station);
+    }
+
+    // The belt: in the gap that holds the snow line (between the two planets around it), inside the first
+    // planet if all are beyond it, outside the last if none is. Its own random stream: the rest of the system
+    // is the same as before belts existed.
+    Rng belt(hashCombine(seed, fnv1a64("space.asteroid-belt")));
+    std::vector<f64> orbits;
+    for (const i32 index : planets) {
+        orbits.push_back(system.bodies[static_cast<usize>(index)].orbit.semiMajorAxis);
+    }
+    const f64 snowLineMeters = snowLine * kAstronomicalUnit;
+    usize beyond = 0;
+    while (beyond < orbits.size() && orbits[beyond] <= snowLineMeters) {
+        ++beyond;
+    }
+    f64 beltRadius = 0.0;
+    if (beyond == orbits.size()) {
+        beltRadius = orbits.back() * 1.4;
+    } else if (beyond == 0) {
+        beltRadius = orbits.front() * 0.7;
+    } else {
+        beltRadius = std::sqrt(orbits[beyond - 1] * orbits[beyond]); // 1.2x from each: clear of their wells
+    }
+    const char* const letters[] = {"A", "B", "C", "D"};
+    for (u32 f = 0; f < kBeltFields; ++f) {
+        const bool icy = f + 1 == kBeltFields;
+        BodyDesc field;
+        field.name = std::string(icy ? pick(belt, kIceFieldTitles) : pick(belt, kRockFieldTitles)) + " " +
+                     system.name + " " + letters[f];
+        field.kind = icy ? BodyKind::IceField : BodyKind::AsteroidField;
+        field.radius = kFieldRadius;
+        field.gm = 0.0;
+        field.parent = 0;
+        field.orbit =
+            randomOrbit(belt, beltRadius * belt.uniform(1.0 - kBeltSpread, 1.0 + kBeltSpread), 0.05, 0.03);
+        system.bodies.push_back(field);
     }
     return system;
 }

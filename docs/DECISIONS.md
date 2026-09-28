@@ -596,3 +596,81 @@ sustituya y explique por qué.
 - **Consecuencias:** los textos de registro (logs) y del headless siguen en inglés técnico. El headless
   escribe el diario en español o en el idioma de `--lang`. Añadir un idioma consiste en copiar `en.po`,
   traducir y ejecutar `check`.
+
+## ADR-037 — La empresa del jugador: una cuenta, una flota con órdenes permanentes, crédito y seguro
+
+- **Contexto:** GDD §26 (vertical slice: "una flota") y §29 (Nave → Flota → Empresa). Hasta M3.5 el jugador
+  pilotaba una sola nave; el banco y la Mutua (ADR-033) solo servían a los comerciantes NPC.
+- **Decisión:**
+  - **Una cuenta de empresa.** Las naves del jugador no llevan `Wallet`: todas gastan de
+    `CompanyBooks::account` (`Sandbox::walletOf`). El dinero sobrevive a cualquier nave. `CompanyTotals`
+    registra cada movimiento, de modo que la cuenta siempre es la inicial + ventas − compras − impuestos +
+    contratos + recompensas − reparaciones − salarios − primas − intereses + indemnizaciones − naves
+    compradas + vendidas + préstamos − devoluciones (identidad comprobada en los tests).
+  - **Astillero.** En cualquier estación (`BuyShipCommand`): Carguero (6.000 cr), Minero (5.500) y Escolta
+    (7.000). Se entregan atracadas allí. Venta a los astilleros al 70 % (`SellShipCommand`).
+  - **Órdenes permanentes** (`FleetBrain`, `FleetOrderCommand`), ejecutadas por capitanes contratados
+    cada 2 s: mantener posición, atracar en un puerto, minar un campo (y vender donde se elija o donde mejor
+    paguen), comerciar por su cuenta (el mismo planificador que los NPC, `planTrip`, pero con lo que sabe la
+    empresa y dejando 1.000 cr de reserva) y escoltar a una nave de la empresa (por defecto, la tuya). Una
+    nave atacada huye a la estación más cercana y vuelve al trabajo reparada. Las escoltas atacan al objetivo
+    del buque insignia o al corsario más cercano a quien protegen, y se retiran a reparar por debajo del 40 %.
+  - **Tomar el mando** (`FlagshipCommand`): el jugador pasa a pilotar otra nave de su flota; la que deja se
+    queda en espera. Los comandos directos (pilotar, sensores, fuego, comercio, abordaje) solo valen para la
+    nave que se pilota.
+  - **Crédito con base de préstamo (borrowing base).** El banco presta hasta el 75 % del valor de los cascos
+    de la flota, la misma LTV que a los comerciantes (ADR-033): interés del 2 %/h y amortización en 12 h.
+    Si la garantía se reduce (nave perdida o vendida), el exceso de deuda vence en el acto. El descubierto
+    lo cubre la línea de crédito mientras haya margen (iliquidez no es insolvencia). Si la cuenta no se
+    cubre ni con la carga a bordo durante 30 minutos, se vende la nave más valiosa (nunca la que se pilota)
+    al 50 %.
+  - **Seguro con tarificación por experiencia.** La Mutua asegura los cascos del jugador (obligatorio si el
+    banco los financia). La prima es la del pool corregida con la siniestralidad propia de la empresa,
+    ponderada por credibilidad (Bühlmann): Z = n/(n + k), con n las horas-carguero aseguradas (con el mismo
+    olvido exponencial que la Mutua) y k = 5. Una empresa sin siniestros y con cinco naves acaba pagando
+    entre un cuarto y un tercio de la prima del pool. Las indemnizaciones pagan primero al banco, por la regla de la garantía.
+  - Los corsarios tratan a las Escoltas como a los patrulleros: no las cazan y rompen el contacto si las
+    tienen cerca. Recompensas y reputación se aplican a lo que haga cualquier nave de la empresa.
+  - Todo va por comandos: determinista, guardable y reproducible (tests de guardado y de 0/3/7 hilos con
+    flota).
+- **Consecuencias:** el jugador puede crecer de nave a empresa, y las finanzas de M3.5 pasan a ser suyas.
+  Con 2.000 cr iniciales, un Minero financiado no aguanta su primer ciclo sin comerciar antes: el astillero
+  muestra los costes por hora (tripulación, seguro y deuda) antes de comprar. Pendiente: tripulación como
+  personas (GDD §7.3), mantenimiento y depreciación de los cascos, y seguro de la carga.
+
+## ADR-038 — Minería: un cinturón en la línea de hielo, yacimientos que se recuperan y ventas por ciclo
+
+- **Contexto:** GDD §26 ("minería") y §5.1 (minerales, hielo). La extracción planetaria era abstracta; no
+  había nada que minar con una nave.
+- **Decisión:**
+  - **Cinturón de asteroides** en el generador (con su propio flujo aleatorio: el resto del sistema no
+    cambia). Se sitúa en el hueco entre los dos planetas que rodean la línea de hielo, a la media geométrica
+    de sus órbitas: queda 1,2 veces lejos de cada una y fuera de sus pozos. Tiene tres campos (`BodyKind`
+    `AsteroidField`/`IceField`, sin pozo gravitatorio): dos de roca (dan mineral) y uno de hielo (da agua),
+    porque un cinturón en la línea de hielo mezcla ambos.
+  - **Yacimiento** (`Deposit`, en `Simulation/Economy`): 4.000 t que se recuperan a ritmo constante hasta su
+    tamaño (120 t/h la roca, 150 t/h el hielo). Un campo sostiene su ritmo de recuperación y no más. Lo
+    extraído entra en el balance de conservación como producción.
+  - **Minero** (Minero: dos láseres, 60 t/h cada uno a plena salud, 120 t de bodega) y `ModuleType::Mining`:
+    el daño reduce el ritmo. Se mina a menos de 60 km del centro del campo y con la velocidad del campo
+    (±200 m/s). El jugador mina a mano (`MineCommand`) con un Minero que pilote.
+  - **Dónde vender: valor por ciclo, no por trayecto.** La primera versión elegía el mercado por valor por
+    segundo de viaje y vendía mineral a un planeta que ya lo produce (12 cr/t) a unos minutos, en vez de a la
+    refinería (25 cr/t) a unos minutos más, con una hora de extracción por medio. Ahora se aplica
+    renovación-recompensa: valor ÷ (ida + vuelta al campo + llenar la bodega). El beneficio de un Minero en
+    paz pasó de +514 a +1.195 cr/h.
+  - **Conocimiento viejo, contraído hacia el precio base.** Con pocas naves la empresa no refresca precios.
+    Si el valor se multiplicaba por la frescura, el minero solo confiaba en el último puerto visitado. Ahora
+    el valor esperado es frescura × lo sabido + (1 − frescura) × el mercado en su objetivo. Además, las naves
+    de la flota reciben el boletín de las estaciones al atracar.
+  - **Los corsarios acechan donde hay presa.** Un campo pasa a ser punto de emboscada solo si su imagen de
+    sensores muestra naves cerca (no la verdad: ADR-025). Un campo que nadie mina no atrae a nadie.
+- **Medido** (8 h, 4 semillas, `docs/BENCHMARKS.md`):
+  - En paz, cada Minero rinde de +820 a +1.000 cr/h. El precio del mineral en la refinería baja con cada
+    minero (de ~20 a ~12 cr/t con cuatro): la curva de demanda es real y el cuarto minero rinde menos.
+  - Con 3 piratas la minería está en el límite de lo rentable. Tres mineros solos pierden de 0 a 2 naves.
+    Con una Escolta concentrada en su campo, las pérdidas bajan a 0 en 3 de 4 semillas y el tonelaje se
+    duplica o triplica.
+- **Consecuencias:** hay otra fuente de mineral y agua que compite con los planetas, y otra presa para los
+  corsarios. El equilibrio de las Escoltas depende de las pérdidas que evitan. Pendiente: mineros NPC,
+  materiales raros y yacimientos en lunas.

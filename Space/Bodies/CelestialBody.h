@@ -19,11 +19,15 @@ enum class BodyKind : u8 {
     GasGiant,
     Moon,
     Station,
+    // Clusters of small bodies on their own orbits around the star (no gravity well): rock and metal, or ice.
+    AsteroidField,
+    IceField,
     Count
 };
 
 [[nodiscard]] const char* toString(BodyKind kind);
 [[nodiscard]] bool isPlanet(BodyKind kind);
+[[nodiscard]] bool isAsteroidField(BodyKind kind);
 
 // Star, planet, moon or station. Physical data only; what a body means for the economy or politics
 // belongs to other components.

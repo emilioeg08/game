@@ -154,6 +154,31 @@ struct CargoHold {
     }
 };
 
+// A natural stock of a raw good (an asteroid field today, a planet's crust later). Extraction takes from the
+// reserve, which refills at a constant rate up to its size: a deposit sustains its recovery rate and no more.
+struct Deposit {
+    GoodId good = 0;
+    f64 reserve = 0.0;   // t
+    f64 size = 0.0;      // t: the reserve when untouched
+    f64 recovery = 0.0;  // t/h
+    f64 extracted = 0.0; // cumulative (conservation checks)
+    f64 recovered = 0.0; // cumulative
+
+    template <typename Archive>
+    void io(Archive& ar) {
+        ar.io("good", good);
+        ar.io("reserve", reserve);
+        ar.io("size", size);
+        ar.io("recovery", recovery);
+        ar.io("extracted", extracted);
+        ar.io("recovered", recovered);
+    }
+};
+
+// Takes up to `tonnes` whole tonnes and returns how many it took.
+u32 extract(Deposit& deposit, u32 tonnes);
+void recover(Deposit& deposit, f64 hours);
+
 struct Wallet {
     i64 credits = 0;
 
@@ -230,10 +255,11 @@ struct PriceBook {
     }
 };
 
-// Runs every market on a fixed period, in parallel (markets are independent between trades).
+// Runs every market on a fixed period, in parallel (markets are independent between trades), and lets the
+// deposits recover.
 class EconomySystem {
 public:
-    static void registerTypes(Simulation& simulation); // Market, CargoHold, Wallet
+    static void registerTypes(Simulation& simulation); // Market, CargoHold, Wallet, Deposit
 
     void setGoods(std::vector<GoodDef> goods) { m_goods = std::move(goods); }
     [[nodiscard]] const std::vector<GoodDef>& goods() const { return m_goods; }

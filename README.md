@@ -3,8 +3,8 @@
 Motor propio en C++20 para un sandbox 4X de simulación galáctica persistente: la galaxia existe, cambia y
 produce consecuencias aunque el jugador no la esté mirando.
 
-**Estado: M3.5 (El dinero tiene origen: crédito, seguros e inversión).** El primer vertical slice está completo. Hay un juego en
-tiempo real (×1, ×3, ×10):
+**Estado: M4 (De nave a empresa: flota propia y minería).** El vertical slice del GDD (§26) está completo. Hay un
+juego en tiempo real (×1, ×3, ×10, ×30):
 
 - un sistema estelar generado con órbitas keplerianas;
 - tu nave, con autopiloto y salto al hiperespacio fuera de los pozos gravitatorios, o con empuje newtoniano
@@ -40,6 +40,13 @@ banco del sistema, que presta si el negocio cubre la deuda y guarda los ahorros 
 de Fletadores asegura los cascos y las averías con una prima que sale de las pérdidas reales. En paz la
 flota crece y la escasez baja; con piratas el seguro se encarece, los comerciantes se descapitalizan y la
 escasez se dispara. Las patrullas abaratan el seguro.
+
+Y tú puedes pasar de nave a empresa. En el astillero de cualquier estación compras Mineros, Cargueros y
+Escoltas con tu cuenta y con crédito del banco (hasta el 75 % del valor de tu flota), y la Mutua los asegura
+con una prima que se ajusta a tu historial. Tus capitanes siguen órdenes permanentes: minar un campo del
+cinturón de asteroides y vender donde más rinde el ciclo, comerciar por su cuenta, atracar o escoltar a otra
+nave. También puedes tomar el mando de cualquiera y minar a mano. Cada minero baja el precio del mineral, y
+los corsarios acechan los campos donde ven naves: en guerra, una escolta decide si la minería es rentable.
 
 Por debajo están el kernel de M1 (entidades, eventos, comandos, save/load, replay, LOD por frecuencia) y la
 fase 0. El diseño es provisional
@@ -91,7 +98,8 @@ prueba en Windows (MSVC) en cada push. Guía completa, y lo que falta para la ti
 
 Controles: rueda = zoom · arrastrar = mover · clic = seleccionar · **clic derecho = ir allí** ·
 WASD = empuje manual · X = frenar · E = atacar el contacto seleccionado · C = alto el fuego · B = abordar · K = contratos ·
-R/T = radar/transpondedor · ventana Mercado al atracar · Espacio = pausa · 1/2/3 = ×1 (tiempo real)/×3/×10 · H/F = seguir ·
+R/T = radar/transpondedor · ventana Mercado al atracar · L = flota y empresa (astillero, órdenes, cuentas) ·
+Espacio = pausa · 1/2/3/4 = ×1 (tiempo real)/×3/×10/×30 · H/F = seguir ·
 F5/F9 = guardar/cargar · F11 = pantalla completa · Esc = deseleccionar o pausa · F3 = depuración · F1 = ayuda.
 El juego empieza en el menú principal (continuar, nueva partida con semilla, opciones); las opciones se
 guardan en `%APPDATA%\GalaxyEngine\Sandbox\settings.ini`. Idiomas: español e inglés, según el del sistema o
@@ -101,7 +109,9 @@ comprueba que todo esté traducido). La primera configuración descarga SDL3 y D
 
 Modo captura para comprobaciones automáticas:
 `gx_game.exe --frames 60 --prerun-hours 30 --select --screenshot captura.png` (`--no-help` cierra la ayuda;
-`--menu main|pause|options` captura los menús; `--data-dir` usa otra carpeta de datos). Hay un combate reproducible
+`--menu main|pause|options` captura los menús; `--demo-fleet` compra una flota de ejemplo y
+`--fleet-tab fleet|books|yards` abre la ventana de la empresa; `--select-field` selecciona un campo de
+asteroides; `--data-dir` usa otra carpeta de datos). Hay un combate reproducible
 con `gx_game.exe --seed 1 --fly-to 1 --prerun-hours 0.0745 --engage-nearest --zoom 1100 --frames 20
 --screenshot combate.png`.
 
@@ -128,6 +138,9 @@ con `gx_game.exe --seed 1 --fly-to 1 --prerun-hours 0.0745 --engage-nearest --zo
 ./build/release/bin/gx_headless.exe --sandbox --minutes 600 --patrols 0 --dump      # sin patrullas; estado final
 ./build/release/bin/gx_headless.exe --sandbox --minutes 480 --no-finance            # M3.4: reemplazos gratis
 ./build/release/bin/gx_headless.exe --sandbox --minutes 120 --journal --lang en     # el diario, en inglés
+# La empresa del jugador (M4): mineros, cargueros y escoltas con órdenes; cuentas por nave al final
+./build/release/bin/gx_headless.exe --sandbox --minutes 480 --pirates 0 --miners 2 --company-credits 20000
+./build/release/bin/gx_headless.exe --sandbox --minutes 480 --miners 3 --escorts 1 --company-credits 30000
 
 ./build/release/bin/gx_headless.exe --help
 ```
@@ -138,12 +151,12 @@ con `gx_game.exe --seed 1 --fly-to 1 --prerun-hours 0.0745 --engage-nearest --zo
 Engine/        Core, Memory, Math, Jobs, Time, Profiling, Serialization
 Simulation/    Kernel (scheduler, paso, save/load), World (entidades), Events, Commands, Economy
 Space/         Orbits (Kepler), Bodies, Ships (vuelo, autopiloto, módulos), Sensors, Combat, Generation
-Game/          Sandbox (escenario jugable y contenido provisional), Presentation (SystemSnapshot)
+Game/          Sandbox (escenario jugable, empresa y flota del jugador, contenido provisional), Presentation
 Scenarios/     cargas sintéticas para tests y benchmarks (no contenido de juego)
 Apps/          gx_game (cliente SDL3 + ImGui), gx_headless
 ThirdParty/    SDL3 y Dear ImGui (FetchContent con hash)
 Benchmarks/    gx_bench
-Tests/         gx_tests (18 suites en CTest)
+Tests/         gx_tests (20 suites en CTest)
 docs/          DESIGN.md, ARCHITECTURE.md, DECISIONS.md, BENCHMARKS.md
 cmake/ scripts/ tools/
 ```

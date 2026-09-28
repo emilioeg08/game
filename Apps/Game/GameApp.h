@@ -11,6 +11,7 @@
 #include "Game/Sandbox/Sandbox.h"
 #include "Simulation/Kernel/Simulation.h"
 
+#include <array>
 #include <filesystem>
 #include <memory>
 #include <optional>
@@ -44,6 +45,11 @@ public:
         // Where to start: "" (the main menu; straight into the game when capturing frames), "main",
         // "pause" or "options" (captures of the menus).
         std::string menu;
+        // Captures of the company: a demo fleet bought at the start (a Minero mining the nearest rock field,
+        // a Carguero trading, an Escolta guarding the Minero), the fleet window on a tab, a field selected.
+        bool demoFleet = false;
+        std::string fleetTab; // "fleet", "books" or "yards"
+        bool selectField = false;
     };
 
     GameApp();
@@ -123,6 +129,16 @@ private:
     void drawJournal();
     void drawDebugPanel();
     void drawHelp();
+    // The company (Apps/Game/FleetWindows.cpp, ADR-037): its fleet, its books and the station's yards.
+    void drawFleetWindow();
+    void drawFleetList();
+    void drawCompanyBooks();
+    void drawShipyard();
+    // The standing orders of one company ship (in the fleet window and the selection panel).
+    void drawFleetOrders(const FleetShipView& ship);
+    // The player's mining lasers (in the ship panel), and what a selected field holds.
+    void drawMiningSection(const ShipView& ship);
+    void drawFieldSelection(EntityId field);
 
     [[nodiscard]] Simulation& simulation() { return m_session->simulation; }
     [[nodiscard]] Sandbox& sandbox() { return m_session->sandbox; }
@@ -170,7 +186,19 @@ private:
 
     bool m_showHelp = true;
     bool m_showTraffic = false; // journal: NPC comings and goings
+    bool m_showFleetLog = true; // journal: the routine of the company's ships (sales, fields)
     bool m_showContracts = true;
+    bool m_showFleet = false;
+    std::string m_fleetTabRequest; // capture option: select this tab once
+    // Fleet window state: the order being edited (for m_orderShip) and the yards' financing.
+    EntityId m_orderShip;
+    FleetOrder m_orderKind = FleetOrder::Hold;
+    EntityId m_orderSite;
+    EntityId m_orderMarket;
+    std::array<int, 8> m_downPercent{}; // per ship class: the down payment, % of the price (0: the least)
+    bool m_insureNew = true;
+    i64 m_borrowAmount = 1'000;
+    i64 m_repayAmount = 1'000;
     bool m_showDebug = false;
     bool m_quit = false;
     std::string m_status;

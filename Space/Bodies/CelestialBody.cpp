@@ -23,6 +23,10 @@ const char* toString(BodyKind kind) {
         return "Moon";
     case BodyKind::Station:
         return "Station";
+    case BodyKind::AsteroidField:
+        return "AsteroidField";
+    case BodyKind::IceField:
+        return "IceField";
     case BodyKind::Count:
         break;
     }
@@ -32,6 +36,10 @@ const char* toString(BodyKind kind) {
 bool isPlanet(BodyKind kind) {
     return kind == BodyKind::RockyPlanet || kind == BodyKind::DesertPlanet || kind == BodyKind::OceanPlanet ||
            kind == BodyKind::IcePlanet || kind == BodyKind::GasGiant;
+}
+
+bool isAsteroidField(BodyKind kind) {
+    return kind == BodyKind::AsteroidField || kind == BodyKind::IceField;
 }
 
 OrbitState bodyStateAt(const World& world, EntityId body, SimTime time) {

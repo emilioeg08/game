@@ -141,6 +141,9 @@ f64 standoffDistance(const World& world, EntityId target) {
     switch (body.kind) {
     case BodyKind::Station:
         return 5'000.0;
+    case BodyKind::AsteroidField:
+    case BodyKind::IceField:
+        return 10'000.0; // among the rocks
     case BodyKind::Star:
         return body.radius * 3.0;
     default:

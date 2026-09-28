@@ -31,8 +31,9 @@ struct StarSystemDesc {
 
 // Provisional generation rules (docs/DESIGN.md): one star, 4-9 planets with spacing ratios of 1.45-2.0,
 // kinds by distance to the habitable zone and the snow line, moons inside a fraction of each planet's Hill
-// sphere, and two stations (the main port around the most habitable planet, a second one around a gas giant
-// or another planet).
+// sphere, two stations (the main port around the most habitable planet, a second one around a gas giant or
+// another planet) and an asteroid belt in the gap between the planets that holds the snow line: two rocky
+// fields and an icy one (a real belt at the snow line mixes both), listed last.
 [[nodiscard]] StarSystemDesc generateStarSystem(u64 seed);
 
 // Invented pronounceable name (never taken from real catalogues).

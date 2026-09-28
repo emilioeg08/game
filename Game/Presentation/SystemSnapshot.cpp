@@ -45,6 +45,18 @@ const KnownPricesView* SystemSnapshot::findKnownPrices(EntityId port) const {
     return it == knownPrices.end() ? nullptr : &*it;
 }
 
+const FleetShipView* SystemSnapshot::findFleetShip(EntityId id) const {
+    const auto it =
+        std::find_if(fleet.begin(), fleet.end(), [id](const FleetShipView& s) { return s.id == id; });
+    return it == fleet.end() ? nullptr : &*it;
+}
+
+const DepositView* SystemSnapshot::findDeposit(EntityId field) const {
+    const auto it = std::find_if(deposits.begin(), deposits.end(),
+                                 [field](const DepositView& d) { return d.field == field; });
+    return it == deposits.end() ? nullptr : &*it;
+}
+
 bool SystemSnapshot::positionOf(EntityId id, Vec3d& out) const {
     if (const ShipView* ship = findShip(id)) {
         out = ship->position;
@@ -91,6 +103,12 @@ void SnapshotBuilder::build(const Simulation& simulation, const Sandbox& sandbox
     out.dockedPort = {};
     out.markets.clear();
     out.knownPrices.clear();
+    out.fleet.clear();
+    out.deposits.clear();
+    out.playerCanMine = false;
+    out.playerMining = false;
+    out.playerMiningField = {};
+    out.playerMiningRate = 0.0;
     out.playerFaction = content::kFactionPlayer;
     out.playerAlive = false;
     out.playerRespawnIn = 0.0;
@@ -184,12 +202,76 @@ void SnapshotBuilder::build(const Simulation& simulation, const Sandbox& sandbox
         out.playerRespawnIn = std::max(0.0, (sandbox.playerRespawnAt() - now).toSeconds());
     }
 
-    // Economy: the player's purse and hold, every market (live) and what the player knows of each.
+    // Economy: the company's account, the player's hold, every market (live) and what the player knows of
+    // each.
+    out.playerCredits = sandbox.company().account.credits;
+    const CompanyBooks& books = sandbox.company();
+    out.company = {books.account.credits,
+                   books.debt,
+                   books.instalment,
+                   sandbox.creditLimit(world),
+                   sandbox.fleetValue(world),
+                   sandbox.companyCargoValue(world),
+                   sandbox.companyWorth(world),
+                   sandbox.companyPremiumPerHour(content::kHaulerHullPrice),
+                   books.overdrawn,
+                   sandbox.config().finance,
+                   books.totals};
+    const ComponentStore<FleetBrain>& brains = world.components<FleetBrain>();
+    for (usize i = 0; i < brains.size(); ++i) {
+        const EntityId id = brains.entities()[i];
+        const FleetBrain& brain = brains.values()[i];
+        const ShipIdentity* identity = world.components<ShipIdentity>().tryGet(id);
+        if (identity == nullptr) {
+            continue;
+        }
+        FleetShipView view;
+        view.id = id;
+        view.name = identity->name;
+        view.shipClass = identity->shipClass;
+        view.order = brain.order;
+        view.task = brain.task;
+        view.site = brain.site;
+        view.market = brain.market;
+        if (const OwnedShip* owned = world.components<OwnedShip>().tryGet(id)) {
+            view.hullValue = owned->hullValue;
+            view.insured = owned->insured;
+            view.income = owned->income;
+            view.expenses = owned->expenses;
+        }
+        if (const CargoHold* hold = world.components<CargoHold>().tryGet(id)) {
+            view.cargoUsed = hold->used();
+            view.cargoCapacity = hold->capacity;
+        }
+        if (const ShipModules* modules = world.components<ShipModules>().tryGet(id)) {
+            const ShipModule* structure = structureOf(*modules);
+            view.structure = structure != nullptr ? structure->fraction() : 1.0;
+            view.powered = hasPower(*modules);
+        }
+        view.docked = sandbox.dockedPort(world, id);
+        if (const MiningControl* mining = world.components<MiningControl>().tryGet(id)) {
+            view.canMine = true;
+            view.mining = mining->active;
+        }
+        view.armed = world.components<CombatControl>().contains(id);
+        out.fleet.push_back(view);
+    }
+    const ComponentStore<Deposit>& deposits = world.components<Deposit>();
+    for (usize i = 0; i < deposits.size(); ++i) {
+        const Deposit& deposit = deposits.values()[i];
+        out.deposits.push_back({deposits.entities()[i], deposit.good, deposit.reserve, deposit.size});
+    }
     if (out.playerAlive) {
         const EntityId player = sandbox.playerShip();
-        if (const Wallet* wallet = world.components<Wallet>().tryGet(player)) {
-            out.playerCredits = wallet->credits;
+        if (const MiningControl* mining = world.components<MiningControl>().tryGet(player)) {
+            out.playerCanMine = true;
+            out.playerMining = mining->active;
+            out.playerMiningField = mining->field;
+            out.playerMiningRate = miningRate(world.components<ShipModules>().get(player));
         }
+    }
+    if (out.playerAlive) {
+        const EntityId player = sandbox.playerShip();
         if (const CargoHold* hold = world.components<CargoHold>().tryGet(player)) {
             out.playerCargoCapacity = hold->capacity;
             out.playerCargo = hold->items;

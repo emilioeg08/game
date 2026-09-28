@@ -28,8 +28,8 @@ namespace {
 
 constexpr std::string_view kChannel = "Game";
 // x1 is real time (ADR-021): the game is played in real time with modest acceleration.
-constexpr std::array<u32, 3> kSpeeds = {1, 3, 10};
-constexpr std::array<const char*, 3> kSpeedLabels = {"x1", "x3", "x10"};
+constexpr std::array<u32, 4> kSpeeds = {1, 3, 10, 30};
+constexpr std::array<const char*, 4> kSpeedLabels = {"x1", "x3", "x10", "x30"};
 constexpr u64 kSimulationBudgetNs = 8'000'000; // per frame: keeps the client responsive at any speed
 constexpr u64 kStatusDurationNs = 4'000'000'000;
 // The user's data folder: %APPDATA%\GalaxyEngine\Sandbox on Windows. Steam Cloud is set up on this path, so
@@ -192,6 +192,36 @@ int GameApp::run(const Options& options) {
     if (options.flyToPort >= 0 && static_cast<usize>(options.flyToPort) < sandbox().ports().size()) {
         submitPilot(FlightMode::Approach, sandbox().ports()[static_cast<usize>(options.flyToPort)]);
     }
+    if (options.demoFleet) {
+        // Capture helper: what a player with some savings would set up at the home station.
+        sandbox().account().credits += 30'000;
+        const auto buy = [&](u32 shipClass) {
+            simulation().submitCommand(
+                BuyShipCommand{sandbox().playerShip(), shipClass, content::kShipPrices[shipClass], true});
+            simulation().runFor(SimDuration::seconds(1));
+            return simulation().world().components<FleetBrain>().entities().back();
+        };
+        EntityId field;
+        for (const EntityId candidate : sandbox().fields()) {
+            if (!field.isValid() && simulation().world().components<CelestialBody>().get(candidate).kind ==
+                                        BodyKind::AsteroidField) {
+                field = candidate;
+            }
+        }
+        const EntityId miner = buy(content::kShipClassMiner);
+        const EntityId hauler = buy(content::kShipClassHauler);
+        const EntityId escort = buy(content::kShipClassEscort);
+        simulation().submitCommand(FleetOrderCommand{miner, FleetOrder::Mine, field, {}});
+        simulation().submitCommand(FleetOrderCommand{hauler, FleetOrder::Trade, {}, {}});
+        simulation().submitCommand(FleetOrderCommand{escort, FleetOrder::Escort, miner, {}});
+        simulation().runFor(SimDuration::seconds(1));
+        m_showFleet = true;
+        m_selected = miner;
+    }
+    m_fleetTabRequest = options.fleetTab;
+    if (!options.fleetTab.empty()) {
+        m_showFleet = true;
+    }
     if (options.prerunHours > 0.0) {
         simulation().runFor(SimDuration::microseconds(static_cast<i64>(options.prerunHours * 3.6e9)));
         resetTimeController();
@@ -216,17 +246,14 @@ int GameApp::run(const Options& options) {
             resetTimeController();
         }
     }
-    if (options.metersPerPixel > 0.0) {
-        m_map.camera().metersPerPixel = options.metersPerPixel;
-    }
-    if (options.followStar && !sandbox().ports().empty()) {
-        m_map.camera().follow = simulation().world().components<CelestialBody>().entities()[0];
-    }
     if (options.select) {
         m_selected = sandbox().playerShip();
     }
     if (options.selectPort >= 0 && static_cast<usize>(options.selectPort) < sandbox().ports().size()) {
         m_selected = sandbox().ports()[static_cast<usize>(options.selectPort)];
+    }
+    if (options.selectField && !sandbox().fields().empty()) {
+        m_selected = sandbox().fields().front();
     }
     m_showTruth = options.showTruth;
     m_menuSeed = options.seed;
@@ -241,6 +268,16 @@ int GameApp::run(const Options& options) {
         m_showOptions = options.menu == "options";
     }
     m_showHelp = m_showHelp && !options.hideHelp;
+    // Capture framing, after startPlaying() has set the default camera.
+    if (options.metersPerPixel > 0.0) {
+        m_map.camera().metersPerPixel = options.metersPerPixel;
+    }
+    if (options.followStar && !sandbox().ports().empty()) {
+        m_map.camera().follow = simulation().world().components<CelestialBody>().entities()[0];
+    }
+    if (options.selectField && m_selected.isValid()) {
+        m_map.camera().follow = m_selected;
+    }
 
     u32 frame = 0;
     u64 lastNs = platform::monotonicNanoseconds();
@@ -338,6 +375,9 @@ int GameApp::run(const Options& options) {
             drawMarketWindow();
             if (m_showContracts) {
                 drawContractsWindow();
+            }
+            if (m_showFleet) {
+                drawFleetWindow();
             }
             drawJournal();
             if (m_showDebug) {
@@ -660,6 +700,9 @@ void GameApp::handleKeyboard() {
     if (ImGui::IsKeyPressed(ImGuiKey_K, false)) {
         m_showContracts = !m_showContracts;
     }
+    if (ImGui::IsKeyPressed(ImGuiKey_L, false)) {
+        m_showFleet = !m_showFleet;
+    }
     if (ImGui::IsKeyPressed(ImGuiKey_B, false) && m_selectedContact != 0) {
         submitBoard(m_selectedContact);
     }
@@ -840,6 +883,15 @@ void GameApp::drawShipPanel() {
         m_map.camera().follow = ship->id;
     }
     drawCombatSection(*ship);
+    drawMiningSection(*ship);
+    ImGui::Separator();
+    if (ImGui::Button(tr("Flota y empresa (L)"))) {
+        m_showFleet = !m_showFleet;
+    }
+    if (!m_snapshot.fleet.empty()) {
+        ImGui::SameLine();
+        ImGui::TextDisabled(tr("%zu naves más en tu flota"), m_snapshot.fleet.size());
+    }
 
     ImGui::Separator();
     ImGui::TextDisabled("%s", tr("Destinos (clic para fijar rumbo)"));
@@ -1270,6 +1322,15 @@ void GameApp::drawSelectionPanel() {
         m_map.camera().follow = m_selected;
     }
     ImGui::Separator();
+    if (const FleetShipView* fleetShip = m_snapshot.findFleetShip(m_selected)) {
+        if (ImGui::CollapsingHeader(tr("Órdenes"), ImGuiTreeNodeFlags_DefaultOpen)) {
+            drawFleetOrders(*fleetShip);
+        }
+    }
+    if (m_snapshot.findDeposit(m_selected) != nullptr &&
+        ImGui::CollapsingHeader(tr("Yacimiento"), ImGuiTreeNodeFlags_DefaultOpen)) {
+        drawFieldSelection(m_selected);
+    }
     if (isPort && ImGui::CollapsingHeader(tr("Mercado"), ImGuiTreeNodeFlags_DefaultOpen)) {
         if (m_selected == m_snapshot.dockedPort) {
             ImGui::TextColored(color(120, 255, 150), "%s",
@@ -1361,22 +1422,28 @@ void GameApp::drawJournal() {
     ImGui::SetNextWindowSize({440.0f, display.y * 0.45f - 140.0f}, ImGuiCond_FirstUseEver);
     ImGui::Begin(tr("Diario"));
     ImGui::Checkbox(tr("Tráfico de otras naves"), &m_showTraffic);
+    ImGui::SameLine();
+    ImGui::Checkbox(tr("Rutina de tu flota"), &m_showFleetLog);
     ImGui::Separator();
     ImGui::BeginChild("entries");
     const auto& journal = sandbox().journal();
     for (auto it = journal.rbegin(); it != journal.rend(); ++it) {
-        if (it->kind == JournalKind::Traffic && !m_showTraffic) {
+        if ((it->kind == JournalKind::Traffic && !m_showTraffic) ||
+            (it->kind == JournalKind::Fleet && !m_showFleetLog)) {
             continue;
         }
         ImGui::TextDisabled("%s", formatSimTime(it->time, content::kEpochYear).c_str());
         ImGui::SameLine();
+        const bool colored = it->kind != JournalKind::Player;
         if (it->kind == JournalKind::News) {
             ImGui::PushStyleColor(ImGuiCol_Text, color(230, 200, 120));
-        } else if (it->kind == JournalKind::Traffic) {
+        } else if (it->kind == JournalKind::Fleet) {
+            ImGui::PushStyleColor(ImGuiCol_Text, color(150, 190, 240));
+        } else if (colored) {
             ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyle().Colors[ImGuiCol_TextDisabled]);
         }
         ImGui::TextWrapped("%s", render(it->text, activeCatalog()).c_str());
-        if (it->kind != JournalKind::Player) {
+        if (colored) {
             ImGui::PopStyleColor();
         }
     }
@@ -1479,7 +1546,8 @@ void GameApp::drawHelp() {
     ImGui::BulletText("%s", tr("Clic: seleccionar   ·   Clic derecho: ir a ese objeto o a ese punto"));
     ImGui::BulletText("%s",
                       tr("W A S D: empuje manual (newtoniano: la nave sigue derivando)   ·   X: frenar"));
-    ImGui::BulletText("%s", tr("Espacio: pausa   ·   1 / 2 / 3: velocidad x1 (tiempo real) / x3 / x10"));
+    ImGui::BulletText("%s",
+                      tr("Espacio: pausa   ·   1 / 2 / 3 / 4: velocidad x1 (tiempo real) / x3 / x10 / x30"));
     ImGui::BulletText("%s",
                       tr("Viajes largos: salto al hiperespacio fuera de los pozos gravitatorios (círculos)"));
     ImGui::BulletText(
@@ -1492,6 +1560,12 @@ void GameApp::drawHelp() {
         tr("Recompensa por piratas; si los comerciantes te identifican atacándolos, pierdes reputación"));
     ImGui::BulletText("%s",
                       tr("K: contratos (se aceptan en las estaciones; nacen de escaseces y piratas reales)"));
+    ImGui::BulletText(
+        "%s", tr("L: flota y empresa. En el astillero de una estación compras Mineros, Cargueros y Escoltas "
+                 "(el banco financia hasta el 75 %), y les das órdenes: minar, comerciar, escoltar"));
+    ImGui::BulletText("%s",
+                      tr("Minería: con un Minero, entra en un campo de asteroides, detén la nave y pulsa "
+                         "Minar (o toma el mando de un Minero de tu flota)"));
     ImGui::BulletText("%s",
                       tr("Los piratas acechan junto a los pozos; cerca de las estaciones estás a salvo"));
     ImGui::BulletText(

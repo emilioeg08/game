@@ -57,6 +57,10 @@ BodyStyle styleOf(BodyKind kind) {
         return {IM_COL32(150, 150, 150, 255), 2.5f};
     case BodyKind::Station:
         return {IM_COL32(110, 225, 205, 255), 3.0f};
+    case BodyKind::AsteroidField:
+        return {IM_COL32(190, 160, 120, 255), 6.0f};
+    case BodyKind::IceField:
+        return {IM_COL32(170, 225, 250, 255), 6.0f};
     default:
         return {IM_COL32(255, 255, 255, 255), 3.0f};
     }
@@ -92,6 +96,10 @@ const char* displayName(BodyKind kind) {
         return tr("Luna");
     case BodyKind::Station:
         return tr("Estación");
+    case BodyKind::AsteroidField:
+        return tr("Campo de asteroides");
+    case BodyKind::IceField:
+        return tr("Campo de hielo");
     default:
         return "?";
     }
@@ -323,7 +331,25 @@ void MapView::draw(const SystemSnapshot& snapshot, const MapSelection& selected,
         const ImVec2 center = toScreen(body.position);
         const float radius =
             std::clamp(static_cast<float>(body.radius / mpp), style.minRadius, kMaxDrawRadius);
-        if (body.kind == BodyKind::Station && radius <= style.minRadius) {
+        if (isAsteroidField(body.kind)) {
+            // A loose cluster of rocks (or ice): a few dots in a fixed pattern, dimmer as the deposit runs
+            // out.
+            const DepositView* deposit = snapshot.findDeposit(body.id);
+            const f64 fullness =
+                deposit != nullptr && deposit->size > 0.0 ? deposit->reserve / deposit->size : 1.0;
+            const ImU32 rock = (style.color & 0x00FFFFFFu) | (static_cast<ImU32>(90 + 165 * fullness) << 24);
+            constexpr std::array<std::array<float, 3>, 7> kRocks = {{{0.0f, 0.0f, 0.45f},
+                                                                     {0.7f, 0.3f, 0.3f},
+                                                                     {-0.6f, 0.5f, 0.35f},
+                                                                     {-0.3f, -0.7f, 0.3f},
+                                                                     {0.5f, -0.6f, 0.25f},
+                                                                     {-0.9f, -0.1f, 0.2f},
+                                                                     {0.2f, 0.9f, 0.2f}}};
+            for (const auto& [x, y, size] : kRocks) {
+                drawList.AddCircleFilled({center.x + x * radius, center.y + y * radius},
+                                         std::max(1.5f, size * radius), rock);
+            }
+        } else if (body.kind == BodyKind::Station && radius <= style.minRadius) {
             drawList.AddRectFilled({center.x - radius, center.y - radius},
                                    {center.x + radius, center.y + radius}, style.color);
         } else {

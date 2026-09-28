@@ -23,6 +23,7 @@ enum class ModuleType : u8 {
     Weapon,
     Cargo,
     Quarters,
+    Mining, // extraction laser: works only inside an asteroid field
     Count
 };
 

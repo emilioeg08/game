@@ -58,6 +58,9 @@ más de un sistema estelar.
 - **Nombres**: inventados con sílabas propias (estrella), numeración romana (planetas), letras (lunas) y
   títulos en español para las estaciones ("Puerto", "Estación", "Atalaya", "Muelle", "Enclave", "Relé").
   Nunca se usan catálogos reales ni nombres de otros juegos.
+- **Cinturón de asteroides** (ADR-038): en el hueco entre los dos planetas que rodean la línea de hielo, a
+  la media geométrica de sus órbitas. Tiene tres campos sin pozo gravitatorio: dos de roca ("Campo",
+  "Cantera") y uno de hielo ("Glaciar", "Témpano").
 - **Órbitas**: raíles keplerianos analíticos. Los cuerpos no se integran y no derivan.
 
 ## Modelo de vuelo (ADR-022)
@@ -93,6 +96,9 @@ más de un sistema estelar.
 | Correo | nave del jugador | 50 km/s² / 15.000 km/s | 1.500.000 km/s (5 c) | 5 s | ~100 s |
 | Carguero | transporte NPC | 15 km/s² / 6.000 km/s | 600.000 km/s (2 c) | 12 s | ~250 s |
 | Corsario | pirata NPC | 40 km/s² / 12.000 km/s | 1.200.000 km/s (4 c) | 6 s | ~125 s |
+| Patrullero | la Autoridad | 45 km/s² / 14.000 km/s | 1.400.000 km/s | 5 s | ~107 s |
+| Minero | empresa del jugador | 12 km/s² / 5.000 km/s | 550.000 km/s | 14 s | ~272 s |
+| Escolta | empresa del jugador | 42 km/s² / 15.000 km/s | 1.500.000 km/s (5 c) | 5 s | ~100 s |
 
 Las referencias muestran velocidades sublumínicas de ~20.000 km/s y velocidades de hiperespacio de más de
 un millón de km/s. Con ×1 = tiempo real, un viaje entre planetas dura de 3 a 6 minutos a ×1 (menos de un
@@ -469,9 +475,65 @@ servicio de la deuda (cuota + intereses). Además necesita la caja: conserva el 
   mínimas (sin finanzas, entre 5.100 y 7.600). El crédito amplifica la suerte: una mala racha
   descapitaliza, y la descapitalización frena la recuperación.
 
+## La empresa del jugador y su flota (ADR-037)
+
+El jugador empieza con una nave y 2.000 cr, y puede hacer crecer una **empresa**: una cuenta para todas sus
+naves, un astillero en cada estación y capitanes contratados que siguen órdenes permanentes.
+
+| Nave | Precio | Tripulación | Qué hace |
+|---|---|---|---|
+| Carguero | 6.000 cr | 300 cr/h | 100 t de bodega; comercia por su cuenta con lo que sabe la empresa |
+| Minero | 5.500 cr | 360 cr/h | 2 láseres de minería (120 t/h), 120 t de bodega, lento |
+| Escolta | 7.000 cr | 480 cr/h | 2 láseres y un cañón de riel, radar de tiro, tan rápida como un Correo |
+
+- **Órdenes:** mantener posición, atracar en un puerto, minar un campo (y vender en un puerto o donde mejor
+  paguen), comerciar, o escoltar a otra nave de la empresa (por defecto, la tuya). Se dan en la ventana
+  **Flota y empresa (L)** o en el panel de selección de la nave. Una nave atacada huye a una estación y
+  vuelve al trabajo reparada.
+- **Tomar el mando:** pilotas otra nave de tu flota (por ejemplo, un Minero para minar a mano); la que dejas
+  se queda en espera.
+- **Crédito:** el banco presta hasta el 75 % del valor de tus cascos, con un 2 %/h de interés y amortización
+  en 12 h. Cubre tu descubierto mientras quede margen. Si la cuenta sigue al descubierto 30 minutos,
+  descontada la carga a bordo, vende tu nave más valiosa.
+- **Seguro:** la Mutua asegura tus cascos (obligatorio si están financiados) y cubre sus reparaciones. La
+  prima parte de la del pool y se ajusta con tu historial, ponderado por credibilidad: sin siniestros, con
+  unas cuantas naves pagas de un cuarto a la mitad.
+- **Cuentas:** ingresos y gastos por partida desde el comienzo. Cada nave lleva también su resultado propio
+  (ingresos menos gastos).
+
+## Minería (ADR-038)
+
+- Cada sistema tiene un **cinturón de asteroides** en la línea de hielo, con dos campos de roca (mineral) y
+  uno de hielo (agua). Cada campo guarda 4.000 t que se recuperan a 120 t/h (roca) o a 150 t/h (hielo).
+  Minarlo más deprisa lo agota hasta que se recupera; entonces los mineros de la empresa se mudan a otro
+  campo del mismo tipo que tenga reservas.
+- Para minar: un **Minero** a menos de 60 km del centro del campo y con su velocidad. Los láseres rinden
+  60 t/h cada uno, en proporción a su salud.
+- Los mineros venden donde más rinde el **ciclo completo** (ir, volver y llenar la bodega), no el trayecto
+  más corto.
+- Los corsarios solo acechan un campo si sus sensores han visto naves cerca.
+
+**Medido** (8 h, sin piratas, 4 semillas; beneficio = variación del patrimonio con los cascos a precio de
+compra):
+
+| Mineros | Minado | Beneficio por minero y hora | Mineral en la refinería al final |
+|---|---|---|---|
+| 0 | — | — | 15–24 cr/t (19,5 de media) |
+| 1 | 541–730 t | 858 cr/h | 14–30 cr/t |
+| 2 | 1.080–1.459 t | 1.008 cr/h | 11–20 cr/t |
+| 4 | 2.130–2.900 t | 819 cr/h | 9–19 cr/t (12 de media) |
+
+- **Cada minero baja el precio:** con cuatro, el mineral de la refinería vale un 37 % menos. El segundo
+  minero sale mejor que el primero porque la empresa asegura más horas sin siniestros y paga menos prima.
+- **Con 3 piratas la minería está en el límite.** Tres mineros solos pierden de 0 a 2 naves y cierran entre
+  −6.200 y −400 cr. Con una Escolta en su campo, 0 pérdidas en 3 de 4 semillas, el doble o el triple de
+  tonelaje y de +1.600 a +2.300 cr en dos semillas. La semilla 99 es una guerra perdida de todos modos: la
+  refinería se queda sin mineral y los comerciantes entregan un 60 % menos.
+
 ## Facciones y personajes (mínimo)
 
-- **Jugador** (verde), **Transportistas independientes** (azul) y **Piratas** (rojo). La política, las
+- **Jugador** (verde; su flota, en azul claro), **Transportistas independientes** (azul) y **Piratas**
+  (rojo). La política, las
   Casas y los títulos llegarán en la fase 5.
 - Nave del jugador: "Errante" (Correo). Cargueros: nombre + número ("Faro-12", "Nómada-47"). Corsarios:
   "Colmillo-66", "Sombra-86"...
@@ -520,7 +582,9 @@ servicio de la deuda (cuota + intereses). Además necesita la caja: conserva el 
 | Comprar / vender | ventana Mercado, atracado en un puerto (+1, +10, −1, Todo) |
 | Abordar el contacto seleccionado (sin energía, a < 5 km, velocidad igualada) | B |
 | Contratos | K (se aceptan atracado en una estación) |
-| Pausa / velocidad | Espacio / 1 (×1), 2 (×3), 3 (×10) |
+| Flota y empresa: naves, órdenes, cuentas, crédito, astillero | L |
+| Minar (con un Minero, dentro de un campo y parado) | botón Minar en el panel Nave |
+| Pausa / velocidad | Espacio / 1 (×1), 2 (×3), 3 (×10), 4 (×30) |
 | Seguir tu nave / la selección | H / F |
 | Guardar / cargar | F5 / F9 (en `%APPDATA%\GalaxyEngine\Sandbox\saves`) |
 | Pantalla completa | F11 o Alt+Intro |

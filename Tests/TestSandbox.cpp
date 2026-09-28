@@ -304,7 +304,7 @@ GX_TEST(Sandbox, StationsRepairAndDamageControlRestoresPower) {
     const auto modules = [&]() -> ShipModules& { return world.components<ShipModules>().get(player); };
 
     // Docked at the home station: everything is patched up at 2% per second (paid: give it the money).
-    world.components<Wallet>().get(player).credits = 100'000;
+    session.sandbox.account().credits = 100'000;
     for (ShipModule& module : modules().modules) {
         module.health = module.maxHealth * 0.3;
     }
@@ -392,6 +392,10 @@ GoodsCensus census(const World& world) {
             result.cargo[item.good] += item.tonnes;
         }
     }
+    for (const Deposit& deposit : world.components<Deposit>().values()) {
+        result.produced[deposit.good] +=
+            deposit.extracted; // mined goods enter the economy like produced ones
+    }
     return result;
 }
 
@@ -415,7 +419,7 @@ GX_TEST(Sandbox, EveryPortHasAMarketAndEveryGoodASupplier) {
         GX_EXPECT(production >= consumption * content::kSupplyMargin - 1e-6); // no structural famine
     }
     const EntityId player = session.sandbox.playerShip();
-    GX_EXPECT_EQ(world.components<Wallet>().get(player).credits, content::kPlayerStartCredits);
+    GX_EXPECT_EQ(session.sandbox.account().credits, content::kPlayerStartCredits);
     GX_EXPECT_EQ(world.components<CargoHold>().get(player).capacity,
                  content::kCargoCapacity[content::kShipClassCourier]);
     GX_EXPECT_EQ(session.sandbox.playerPrices().ports.size(),
@@ -502,14 +506,14 @@ GX_TEST(Sandbox, PlayerBuysAndSellsWhenDocked) {
 
     session.simulation.submitCommand(TradeCommand{player, good, 5});
     session.simulation.runFor(SimDuration::seconds(1));
-    const i64 afterBuying = world.components<Wallet>().get(player).credits;
+    const i64 afterBuying = session.sandbox.account().credits;
     GX_EXPECT_EQ(world.components<CargoHold>().get(player).amount(good), 5u);
     GX_EXPECT(afterBuying < content::kPlayerStartCredits);
     GX_EXPECT(session.journalContains("Compras 5 t"));
 
     session.simulation.submitCommand(TradeCommand{player, good, -5});
     session.simulation.runFor(SimDuration::seconds(1));
-    const i64 afterSelling = world.components<Wallet>().get(player).credits;
+    const i64 afterSelling = session.sandbox.account().credits;
     GX_EXPECT_EQ(world.components<CargoHold>().get(player).amount(good), 0u);
     GX_EXPECT(afterSelling > afterBuying);
     GX_EXPECT(afterSelling < content::kPlayerStartCredits); // the spread is the market's cut
@@ -534,7 +538,7 @@ GX_TEST(Sandbox, PlayerBuysAndSellsWhenDocked) {
                  rejectedBefore + (untraded < content::kGoodCount ? 2u : 1u));
     GX_EXPECT(world.components<CargoHold>().get(player).used() <=
               world.components<CargoHold>().get(player).capacity);
-    GX_EXPECT(world.components<Wallet>().get(player).credits >= 0);
+    GX_EXPECT(session.sandbox.account().credits >= 0);
 }
 
 GX_TEST(Sandbox, StationsPublishTheTradersPriceBulletin) {
@@ -615,7 +619,7 @@ GX_TEST(Sandbox, TradesPayTaxToTheAuthority) {
     session.simulation.runFor(SimDuration::milliseconds(10));
     const i64 tax = session.sandbox.treasury() - treasury;
     GX_EXPECT_EQ(tax, std::llround(static_cast<f64>(price) * content::kTradeTaxRate));
-    GX_EXPECT_EQ(world.components<Wallet>().get(player).credits, content::kPlayerStartCredits - price - tax);
+    GX_EXPECT_EQ(session.sandbox.account().credits, content::kPlayerStartCredits - price - tax);
     GX_EXPECT(session.journalContains("de impuestos"));
 }
 
@@ -628,14 +632,14 @@ GX_TEST(Sandbox, StationRepairsAreChargedAndNeedMoney) {
     structure.health = structure.maxHealth - 100.0; // 100 points to repair
     const i64 treasury = session.sandbox.treasury();
     session.simulation.runFor(SimDuration::seconds(30));
-    const i64 paid = content::kPlayerStartCredits - world.components<Wallet>().get(player).credits;
+    const i64 paid = content::kPlayerStartCredits - session.sandbox.account().credits;
     GX_EXPECT_NEAR(structure.fraction(), 1.0, 1e-9);
     GX_EXPECT(std::abs(paid - static_cast<i64>(100.0 * content::kRepairCostPerPoint)) <=
               12); // per-second rounding
     GX_EXPECT_EQ(session.sandbox.treasury() - treasury, paid);
 
     // Broke: no repairs.
-    world.components<Wallet>().get(player).credits = 0;
+    session.sandbox.account().credits = 0;
     structure.health = structure.maxHealth - 100.0;
     session.simulation.runFor(SimDuration::seconds(30));
     GX_EXPECT_NEAR(structure.health, structure.maxHealth - 100.0, 1e-9);
@@ -685,8 +689,7 @@ GX_TEST(Sandbox, DestroyingAPiratePaysABounty) {
     session.simulation.runFor(SimDuration::seconds(20));
     GX_EXPECT(!world.isAlive(pirate));
     GX_EXPECT_EQ(session.sandbox.stats().bountiesPaid, content::kPirateBounty);
-    GX_EXPECT(world.components<Wallet>().get(player).credits >=
-              content::kPlayerStartCredits + content::kPirateBounty);
+    GX_EXPECT(session.sandbox.account().credits >= content::kPlayerStartCredits + content::kPirateBounty);
     GX_EXPECT_NEAR(session.sandbox.reputation(), content::kReputationPirateKill, 1e-9);
     GX_EXPECT(session.journalContains("Recompensa"));
 }
@@ -931,7 +934,7 @@ GX_TEST(Sandbox, ShortagesPostDeliveryContractsPaidByThePort) {
     session.simulation.runFor(SimDuration::milliseconds(10));
     session.simulation.submitCommand(ContractCommand{player, id, ContractAction::Deliver});
     session.simulation.runFor(SimDuration::milliseconds(10));
-    GX_EXPECT_EQ(world.components<Wallet>().get(player).credits, content::kPlayerStartCredits + reward);
+    GX_EXPECT_EQ(session.sandbox.account().credits, content::kPlayerStartCredits + reward);
     GX_EXPECT_EQ(world.components<CargoHold>().get(player).amount(content::kGoodWater), 0u);
     GX_EXPECT_NEAR(world.components<Market>().get(home).find(content::kGoodWater)->stock - stockBefore,
                    static_cast<f64>(content::kContractTonnes), 1e-6);
@@ -1044,7 +1047,7 @@ GX_TEST(Sandbox, BountyContractsPayForTheNamedPirate) {
     session.simulation.runFor(SimDuration::seconds(20));
     GX_EXPECT(!world.isAlive(pirate));
     GX_EXPECT_EQ(session.sandbox.stats().contractsCompleted, 1u);
-    GX_EXPECT(world.components<Wallet>().get(player).credits >=
+    GX_EXPECT(session.sandbox.account().credits >=
               content::kPlayerStartCredits + content::kContractBountyReward + content::kPirateBounty);
 }
 
@@ -1126,6 +1129,7 @@ void expectBooksBalance(const Session& session) {
     for (const ShipBuyer& buyer : session.sandbox.buyers()) {
         deposits += buyer.equity;
     }
+    debts += session.sandbox.company().debt; // the player's company borrows from the same bank
     GX_EXPECT(bank.balanced());
     GX_EXPECT(session.sandbox.mutual().balanced());
     GX_EXPECT_EQ(debts, bank.loans);

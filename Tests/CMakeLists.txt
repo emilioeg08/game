@@ -7,6 +7,7 @@ add_executable(gx_tests
     TestCore.cpp
     TestDeterminism.cpp
     TestEvents.cpp
+    TestFleet.cpp
     TestJobs.cpp
     TestKernel.cpp
     TestMemoryMath.cpp
@@ -27,7 +28,7 @@ target_compile_definitions(gx_tests PRIVATE GX_SOURCE_DATA_DIR="${PROJECT_SOURCE
 
 # One CTest entry per suite. gx_tests fails when a suite matches no test, so this list cannot silently drift.
 set(GX_TEST_SUITES Core Memory Math Jobs Time Profiling Serialization World Events Commands Kernel SaveLoad
-    Determinism Space Sandbox Sensors Combat Economy Text)
+    Determinism Space Sandbox Sensors Combat Economy Text Fleet)
 foreach(suite IN LISTS GX_TEST_SUITES)
     add_test(NAME ${suite} COMMAND gx_tests --suite ${suite})
     set_tests_properties(${suite} PROPERTIES TIMEOUT 300)

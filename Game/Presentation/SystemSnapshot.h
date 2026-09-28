@@ -3,6 +3,7 @@
 #include "Engine/Core/Types.h"
 #include "Engine/Math/Vec3.h"
 #include "Engine/Time/SimTime.h"
+#include "Game/Sandbox/Fleet.h"
 #include "Simulation/Economy/Economy.h"
 #include "Simulation/World/EntityRegistry.h"
 #include "Space/Bodies/CelestialBody.h"
@@ -125,6 +126,52 @@ struct KnownPricesView {
     const PortPrices* prices = nullptr; // valid until the next simulation step
 };
 
+// What an asteroid field holds (fields only).
+struct DepositView {
+    EntityId field;
+    GoodId good = 0;
+    f64 reserve = 0.0;
+    f64 size = 0.0;
+};
+
+// A ship of the player's company other than the one the player flies (the fleet window).
+struct FleetShipView {
+    EntityId id;
+    std::string_view name;
+    u32 shipClass = 0;
+    FleetOrder order = FleetOrder::Hold;
+    FleetTask task = FleetTask::Idle;
+    EntityId site;
+    EntityId market;
+    i64 hullValue = 0;
+    bool insured = false;
+    i64 income = 0;
+    i64 expenses = 0;
+    u32 cargoUsed = 0;
+    u32 cargoCapacity = 0;
+    f64 structure = 1.0;
+    bool powered = true;
+    EntityId docked; // the port it is docked at, or invalid
+    bool canMine = false;
+    bool mining = false;
+    bool armed = false;
+};
+
+// The company's books as the player sees them.
+struct CompanyView {
+    i64 account = 0;
+    i64 debt = 0;
+    i64 instalment = 0; // per minute
+    i64 creditLimit = 0;
+    i64 fleetValue = 0;
+    i64 cargoValue = 0;
+    i64 worth = 0;
+    f64 premiumPerHauler = 0.0; // the mutual's price for a Carguero's hull, on the company's record
+    bool overdrawn = false;
+    bool finance = true; // a bank and a mutual exist
+    CompanyTotals totals;
+};
+
 // Read-only picture of the simulation for rendering, UI and debug tools: the presentation layer never touches
 // live components. Views reference names owned by the World and are valid until the next simulation step.
 struct SystemSnapshot {
@@ -152,12 +199,22 @@ struct SystemSnapshot {
     EntityId dockedPort; // the port whose market the player can trade at, or invalid
     std::vector<MarketView> markets;
     std::vector<KnownPricesView> knownPrices;
+    // The company (ADR-037).
+    CompanyView company;
+    std::vector<FleetShipView> fleet;
+    std::vector<DepositView> deposits;
+    bool playerCanMine = false; // the player's ship has mining lasers
+    bool playerMining = false;
+    EntityId playerMiningField;
+    f64 playerMiningRate = 0.0; // t/h at the lasers' current health
 
     [[nodiscard]] const BodyView* findBody(EntityId id) const;
     [[nodiscard]] const ShipView* findShip(EntityId id) const;
     [[nodiscard]] const ContactView* findContact(u32 trackId) const;
     [[nodiscard]] const MarketView* findMarket(EntityId port) const;
     [[nodiscard]] const KnownPricesView* findKnownPrices(EntityId port) const;
+    [[nodiscard]] const FleetShipView* findFleetShip(EntityId id) const;
+    [[nodiscard]] const DepositView* findDeposit(EntityId field) const;
     // Position of a body or ship in this snapshot.
     [[nodiscard]] bool positionOf(EntityId id, Vec3d& out) const;
 };

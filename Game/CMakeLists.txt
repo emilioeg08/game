@@ -7,10 +7,13 @@ add_library(gx_gameplay STATIC
     Presentation/UserSettings.h
     Sandbox/Content.h
     Sandbox/Contracts.h
+    Sandbox/Fleet.h
     Sandbox/Sandbox.cpp
     Sandbox/Sandbox.h
     Sandbox/SandboxContracts.cpp
+    Sandbox/SandboxDetail.h
     Sandbox/SandboxFinance.cpp
+    Sandbox/SandboxFleet.cpp
 )
 
 target_link_libraries(gx_gameplay PUBLIC gx_space)

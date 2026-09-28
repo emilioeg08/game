@@ -6,6 +6,7 @@ target_compile_definitions(gx_headless PRIVATE GX_SOURCE_DATA_DIR="${PROJECT_SOU
 
 if(GX_BUILD_CLIENT)
     add_executable(gx_game
+        Game/FleetWindows.cpp
         Game/GameApp.cpp
         Game/GameApp.h
         Game/InspectorView.cpp

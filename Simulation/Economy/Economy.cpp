@@ -280,11 +280,26 @@ u32 PriceBook::mergeNewer(const PriceBook& other) {
     return taken;
 }
 
+u32 extract(Deposit& deposit, u32 tonnes) {
+    const u32 taken = std::min(tonnes, static_cast<u32>(std::max(0.0, std::floor(deposit.reserve))));
+    deposit.reserve -= taken;
+    deposit.extracted += taken;
+    return taken;
+}
+
+void recover(Deposit& deposit, f64 hours) {
+    const f64 added =
+        std::clamp(deposit.recovery * hours, 0.0, std::max(0.0, deposit.size - deposit.reserve));
+    deposit.reserve += added;
+    deposit.recovered += added;
+}
+
 void EconomySystem::registerTypes(Simulation& simulation) {
     World& world = simulation.world();
     world.registerComponent<Market>("Economy.Market");
     world.registerComponent<CargoHold>("Economy.CargoHold");
     world.registerComponent<Wallet>("Economy.Wallet");
+    world.registerComponent<Deposit>("Economy.Deposit");
 }
 
 SystemId EconomySystem::install(Simulation& simulation, SimDuration period, u32 grain) {
@@ -313,6 +328,9 @@ void EconomySystem::update(const TickContext& context) {
             }
         },
         "Simulation.Economy.Markets");
+    for (Deposit& deposit : context.world.components<Deposit>().values()) {
+        recover(deposit, hours); // a handful of fields: serial
+    }
 }
 
 } // namespace gx

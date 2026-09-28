@@ -6,6 +6,7 @@
 #include "Engine/Text/Localization.h"
 #include "Engine/Time/SimTime.h"
 #include "Game/Sandbox/Contracts.h"
+#include "Game/Sandbox/Fleet.h"
 #include "Simulation/Economy/Economy.h"
 #include "Simulation/Economy/Finance.h"
 #include "Simulation/Kernel/SystemScheduler.h"
@@ -231,8 +232,8 @@ struct PatrolBrain {
 };
 
 // Player: what happens to you. News: what the Authority or the markets announce. Traffic: NPC comings and
-// goings (plenty of them: the client hides them unless asked).
-enum class JournalKind : u8 { Player, News, Traffic, Count };
+// goings (plenty of them: the client hides them unless asked). Fleet: the routine of the company's ships.
+enum class JournalKind : u8 { Player, News, Traffic, Fleet, Count };
 
 // What the journal records is a Message, rendered in the player's language when shown (ADR-036).
 struct JournalEntry {
@@ -443,6 +444,23 @@ public:
     [[nodiscard]] const SandboxConfig& config() const { return m_config; }
     [[nodiscard]] bool tactical() const;
 
+    // The player's company (ADR-037). Every ship of the player's faction belongs to it and spends from its
+    // account; the one the player flies is playerShip(), the others have a FleetBrain.
+    [[nodiscard]] const CompanyBooks& company() const { return m_company; }
+    [[nodiscard]] Wallet& account() { return m_company.account; }
+    [[nodiscard]] const std::vector<EntityId>& fields() const { return m_fields; }
+    [[nodiscard]] bool isPlayerShip(const World& world, EntityId ship) const;
+    // What the company's hulls are worth, and what the bank lends against them (the borrowing base).
+    [[nodiscard]] i64 fleetValue(const World& world) const;
+    [[nodiscard]] i64 creditLimit(const World& world) const;
+    // The mutual's premium per hour for a hull of `hullValue`, on the company's record (credibility-weighted
+    // between the mutual's experience and the company's own).
+    [[nodiscard]] f64 companyPremiumPerHour(i64 hullValue) const;
+    // The account, the hulls and the cargo on board (at base prices), less the debt.
+    [[nodiscard]] i64 companyWorth(const World& world) const;
+    // What the company's ships carry, at base prices.
+    [[nodiscard]] i64 companyCargoValue(const World& world) const;
+
 private:
     EntityId spawnShip(World& world, SimTime now, Rng& rng, std::string name, u32 faction, u32 shipClass,
                        EntityId port);
@@ -454,12 +472,68 @@ private:
     void setupMarkets(World& world);
     void planHaulerTrip(World& world, EntityId ship, HaulerBrain& brain, ShipControl& control, SimTime now,
                         Rng& rng);
+    struct Delivery {
+        EntityId port;
+        GoodId good = 0;
+        f64 tonnes = 0.0;
+    };
+    // A trader's next trip, judged with what `prices` knows, `budget` credits to spend and the cargo already
+    // on its way (`inflight`): where to, and what to load here first.
+    struct TripPlan {
+        EntityId destination;
+        GoodId load = 0;
+        u32 tonnes = 0;
+        bool reposition = false; // flying empty to where a known bargain is
+        bool exploration = false;
+    };
+    [[nodiscard]] TripPlan planTrip(const World& world, EntityId ship, const PriceBook& prices,
+                                    const std::vector<Delivery>& inflight, i64 budget, bool contracts,
+                                    SimTime now, Rng& rng) const;
+    // What `tonnes` of `good` would fetch at a known market, after the deliveries on their way there, and
+    // with an open supply contract's reward if `contracts` and the load covers it.
+    [[nodiscard]] f64 saleValue(const PortPrices& known, GoodId good, f64 tonnes,
+                                const std::vector<Delivery>& inflight, bool contracts) const;
     void sellCargo(World& world, EntityId ship, EntityId port, SimTime now);
     // A trader arriving at a port hands over what its supply contracts there ask for.
     void deliverTraderContracts(World& world, EntityId ship, EntityId port, SimTime now);
     void addInflight(EntityId port, GoodId good, f64 tonnes);
     void addDanger(EntityId port, SimTime now);
     void onTradeCommand(const TradeCommand& command, const TickContext& context);
+    // The company and its fleet (Game/Sandbox/SandboxFleet.cpp, ADR-037).
+    void onMineCommand(const MineCommand& command, const TickContext& context);
+    void onBuyShipCommand(const BuyShipCommand& command, const TickContext& context);
+    void onSellShipCommand(const SellShipCommand& command, const TickContext& context);
+    void onFleetOrderCommand(const FleetOrderCommand& command, const TickContext& context);
+    void onFlagshipCommand(const FlagshipCommand& command, const TickContext& context);
+    void onLoanCommand(const LoanCommand& command, const TickContext& context);
+    void onInsureCommand(const InsureCommand& command, const TickContext& context);
+    void updateMining(const TickContext& context);
+    void updateFleet(const TickContext& context);
+    // Wages, premiums and the debt of the company, every minute; an account overdrawn for too long loses a
+    // ship to the bank.
+    void updateCompany(const TickContext& context);
+    EntityId spawnCompanyShip(World& world, SimTime now, u32 shipClass, EntityId port);
+    // Whose purse pays for a ship: the company's account for the player's ships, its own Wallet otherwise.
+    [[nodiscard]] Wallet* walletOf(World& world, EntityId ship);
+    // A company ship was destroyed or captured: the mutual pays the insured hull.
+    void onCompanyShipLost(World& world, EntityId ship, SimTime now);
+    // Removes a company ship sold for `price` (its cargo sold at `port` if it is a market).
+    void sellCompanyShip(World& world, EntityId ship, i64 price, EntityId port, SimTime now);
+    // After the collateral shrank: the debt above the new borrowing base is due now.
+    void enforceBorrowingBase(World& world, SimTime now);
+    void startMining(World& world, EntityId ship, EntityId field);
+    // Sells what the hold carries at the port it is docked at, for the company.
+    void sellFleetCargo(World& world, EntityId ship, EntityId port, SimTime now);
+    // The best known port to sell `tonnes` of `good` at (invalid if none): value per second of the whole
+    // cycle, the trip there, back to `returnTo` (if valid) and `workSeconds` (a miner refilling its hold).
+    [[nodiscard]] EntityId bestMarket(const World& world, EntityId ship, GoodId good, f64 tonnes, SimTime now,
+                                      EntityId except = {}, EntityId returnTo = {},
+                                      f64 workSeconds = 0.0) const;
+    void fleetMine(World& world, EntityId ship, FleetBrain& brain, SimTime now);
+    void fleetTrade(World& world, EntityId ship, FleetBrain& brain, SimTime now, u64 worldSeed);
+    void fleetEscort(World& world, EntityId ship, FleetBrain& brain, SimTime now);
+    // Sends a company ship to `target` (a body or a ship) and marks it travelling.
+    void sendTo(World& world, EntityId ship, FleetBrain& brain, EntityId target);
     void onBoardCommand(const BoardCommand& command, const TickContext& context);
     void onContractCommand(const ContractCommand& command, const TickContext& context);
     void updateContracts(const TickContext& context);
@@ -491,7 +565,7 @@ private:
     void updatePatrols(const TickContext& context);
     void updateAuthority(const TickContext& context);
     void changeReputation(f64 delta);
-    void payBounty(World& world, const std::string& name, SimTime now);
+    void payBounty(const std::string& name, SimTime now);
     void collectTax(i64 tax);
     void updateHaulers(const TickContext& context);
     void updatePirates(const TickContext& context);
@@ -532,7 +606,6 @@ private:
     std::string m_systemName;
     std::vector<JournalEntry> m_journal;
     SandboxStats m_stats;
-    i64 m_playerCredits = 0; // carried over to a replacement ship
     i64 m_treasury = 0;
     f64 m_reputation = 0.0;
     std::vector<Offense> m_offenses;
@@ -551,13 +624,11 @@ private:
     PriceBook m_traderPrices;
     std::vector<PortDanger> m_danger;
     std::vector<f64> m_initialStock;
-    // Derived from the World (rebuilt after loading, or on every Game.Haulers run).
-    struct Delivery {
-        EntityId port;
-        GoodId good = 0;
-        f64 tonnes = 0.0;
-    };
-    std::vector<Delivery> m_inflight; // cargo the traders' ships are carrying to each port
+    CompanyBooks m_company;
+    // Derived from the World (rebuilt after loading, or on every Game.Haulers / Game.Fleet run).
+    std::vector<Delivery> m_inflight;      // cargo the traders' ships are carrying to each port
+    std::vector<Delivery> m_fleetInflight; // and the company's
+    std::vector<EntityId> m_fields;
     std::vector<EntityId> m_ports;
     std::vector<EntityId> m_stations;
     std::vector<EntityId> m_planets;

@@ -80,11 +80,8 @@ void Sandbox::closeContract(Contract& contract, ContractState state, SimTime now
                        JournalKind::News);
             return;
         }
-        if (Wallet* wallet = m_player.isValid() ? world.components<Wallet>().tryGet(m_player) : nullptr) {
-            wallet->credits += contract.reward;
-        } else {
-            m_playerCredits += contract.reward;
-        }
+        m_company.account.credits += contract.reward;
+        m_company.totals.contracts += contract.reward;
         changeReputation(content::kReputationContractDone);
         addJournal(now,
                    msg("Contrato cumplido: {}. Cobras {} cr.", describe(contract), number(contract.reward)));
