@@ -20,7 +20,7 @@ struct Wreck {
     u32 knownBy = 0; // bit per faction
     bool hulk = false;
 
-    [[nodiscard]] bool knownTo(u32 faction) const { return (knownBy >> faction & 1u) != 0; }
+    [[nodiscard]] bool knownTo(u32 viewer) const { return (knownBy >> viewer & 1u) != 0; }
 
     template <typename Archive>
     void io(Archive& ar) {
